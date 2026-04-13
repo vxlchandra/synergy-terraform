@@ -1,0 +1,45 @@
+# =============================================================================
+# .gitignore — Terraform Module
+# =============================================================================
+# Ignores Terraform state, local provider binaries, and sensitive overrides.
+# State is stored remotely in GCS — local copies must not be committed.
+# =============================================================================
+
+# Terraform state (use GCS backend, not local)
+*.tfstate
+*.tfstate.*.backup
+*.tfstate.d/
+crash.log
+crash.*.log
+
+# Terraform working directory (providers, modules cache)
+.terraform/
+.terraform.lock.hcl
+
+# Override files (local dev tweaks)
+override/
+.override/
+*.override.tf
+
+# Plan files (contain full resource state — review before committing)
+*.tfplan
+*.tfplan.json
+plan.out
+
+# Sensitive variable files
+*.auto.tfvars
+*.secret.tfvars
+terraform.tfvars
+terraform.tfvars.backup
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db

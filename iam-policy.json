@@ -1,0 +1,59 @@
+{
+  "bindings": [
+    {
+      "role": "roles/run.invoker",
+      "members": [
+        "serviceAccount:zsds-sa-frontend@PROJECT_ID.iam.gserviceaccount.com",
+        "serviceAccount:zsds-sa-springboot@PROJECT_ID.iam.gserviceaccount.com",
+        "serviceAccount:zsds-sa-classifier@PROJECT_ID.iam.gserviceaccount.com"
+      ]
+    },
+    {
+      "role": "roles/cloudsql.client",
+      "members": [
+        "serviceAccount:zsds-sa-springboot@PROJECT_ID.iam.gserviceaccount.com"
+      ]
+    },
+    {
+      "role": "roles/pubsub.publisher",
+      "members": [
+        "serviceAccount:zsds-sa-springboot@PROJECT_ID.iam.gserviceaccount.com",
+        "serviceAccount:zsds-sa-classifier@PROJECT_ID.iam.gserviceaccount.com"
+      ]
+    },
+    {
+      "role": "roles/pubsub.subscriber",
+      "members": [
+        "serviceAccount:zsds-sa-springboot@PROJECT_ID.iam.gserviceaccount.com",
+        "serviceAccount:zsds-sa-classifier@PROJECT_ID.iam.gserviceaccount.com"
+      ]
+    },
+    {
+      "role": "roles/storage.objectViewer",
+      "members": [
+        "serviceAccount:zsds-sa-springboot@PROJECT_ID.iam.gserviceaccount.com",
+        "serviceAccount:zsds-sa-classifier@PROJECT_ID.iam.gserviceaccount.com"
+      ]
+    },
+    {
+      "role": "roles/datastore.user",
+      "members": [
+        "serviceAccount:zsds-sa-springboot@PROJECT_ID.iam.gserviceaccount.com",
+        "serviceAccount:zsds-sa-classifier@PROJECT_ID.iam.gserviceaccount.com"
+      ]
+    },
+    {
+      "role": "roles/logging.logWriter",
+      "members": [
+        "serviceAccount:zsds-sa-classifier@PROJECT_ID.iam.gserviceaccount.com"
+      ]
+    },
+    {
+      "role": "roles/secretmanager.secretAccessor",
+      "members": [
+        "serviceAccount:zsds-sa-springboot@PROJECT_ID.iam.gserviceaccount.com",
+        "serviceAccount:zsds-sa-classifier@PROJECT_ID.iam.gserviceaccount.com"
+      ]
+    }
+  ]
+}
