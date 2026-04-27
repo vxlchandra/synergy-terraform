@@ -32,11 +32,11 @@ terraform {
     }
   }
 
-  backend "gcs" {
-    # Use a GCS bucket for state storage
-    # bucket = "zsds-terraform-state"
-    # prefix = "terraform/state"
-  }
+  # backend "gcs" {
+  #   # Use a GCS bucket for state storage
+  #   # bucket = "zsds-terraform-state"
+  #   # prefix = "terraform/state"
+  # }
 }
 
 provider "google" {
@@ -129,7 +129,7 @@ resource "google_project_iam_member" "springboot_pubsub_sub" {
 resource "google_project_iam_member" "springboot_storage" {
   count   = var.enable_springboot ? 1 : 0
   project = var.project_id
-  role    = "roles/storage.objectViewer"
+  role    = "roles/storage.objectCreator"
   member  = "serviceAccount:${google_service_account.springboot[0].email}"
 }
 
@@ -141,6 +141,13 @@ resource "google_project_iam_member" "springboot_firestore" {
 }
 
 # Classifier SA roles
+resource "google_project_iam_member" "classifier_cloudsql" {
+  count   = var.enable_classifier ? 1 : 0
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.classifier[0].email}"
+}
+
 resource "google_project_iam_member" "classifier_pubsub_pub" {
   count   = var.enable_classifier ? 1 : 0
   project = var.project_id
@@ -155,24 +162,12 @@ resource "google_project_iam_member" "classifier_pubsub_sub" {
   member  = "serviceAccount:${google_service_account.classifier[0].email}"
 }
 
-resource "google_project_iam_member" "classifier_pubsub_viewer" {
-  count   = var.enable_classifier ? 1 : 0
-  project = var.project_id
-  role    = "roles/pubsub.viewer"
-  member  = "serviceAccount:${google_service_account.classifier[0].email}"
-}
-
-resource "google_project_iam_member" "classifier_pubsub_editor" {
-  count   = var.enable_classifier ? 1 : 0
-  project = var.project_id
-  role    = "roles/pubsub.editor"
-  member  = "serviceAccount:${google_service_account.classifier[0].email}"
-}
+# NOTE: pubsub.editor and pubsub.viewer removed — covered by publisher + subscriber roles above
 
 resource "google_project_iam_member" "classifier_storage" {
   count   = var.enable_classifier ? 1 : 0
   project = var.project_id
-  role    = "roles/storage.objectViewer"
+  role    = "roles/storage.objectCreator"
   member  = "serviceAccount:${google_service_account.classifier[0].email}"
 }
 
@@ -202,12 +197,16 @@ resource "google_project_iam_member" "frontend_run_invoker" {
 # Secret Manager Secrets
 # =============================================================================
 resource "google_secret_manager_secret" "secrets" {
-  for_each = toset(var.secret_names)
-  project  = var.project_id
+  for_each  = toset(var.secret_names)
+  project   = var.project_id
   secret_id = each.key
 
   replication {
-    automatic = true
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
   }
 }
 
@@ -326,8 +325,14 @@ resource "google_cloud_run_v2_service" "springboot" {
 
     max_instance_request_concurrency = var.springboot_concurrency
 
-    timeouts {
-      start = "300s"
+    timeout = "300s"
+
+    vpc_access {
+      network_interfaces {
+        network    = google_compute_network.aeromontek_vpc.name
+        subnetwork = google_compute_subnetwork.springboot_subnet.name
+      }
+      egress = "ALL_TRAFFIC"
     }
 
     labels = {
@@ -337,10 +342,9 @@ resource "google_cloud_run_v2_service" "springboot" {
     }
   }
 
-  # Internal-only ingress
-  ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  # Public ingress (authenticated via Firebase JWT at app level)
+  ingress = "INGRESS_TRAFFIC_ALL"
 
-  # Disable unauthenticated access
   launch_stage = "GA"
 }
 
@@ -421,6 +425,41 @@ resource "google_cloud_run_v2_service" "classifier" {
           }
         }
       }
+
+      env {
+        name  = "CLOUD_SQL_CONNECTION_NAME"
+        value = google_sql_database_instance.postgres.connection_name
+      }
+
+      env {
+        name  = "DB_HOST"
+        value = google_sql_database_instance.postgres.private_ip_address
+      }
+
+      env {
+        name  = "DB_NAME"
+        value = var.cloud_sql_database
+      }
+
+      env {
+        name  = "DB_USER"
+        value = var.cloud_sql_user
+      }
+
+      env {
+        name = "DB_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secrets["aeromon-db-password"].secret_id
+            version = "latest"
+          }
+        }
+      }
+
+      env {
+        name  = "SPRINGBOOT_API_URL"
+        value = "https://${google_cloud_run_v2_service.springboot[0].uri}"
+      }
     }
 
     scaling {
@@ -430,8 +469,14 @@ resource "google_cloud_run_v2_service" "classifier" {
 
     max_instance_request_concurrency = var.classifier_concurrency
 
-    timeouts {
-      start = "600s"
+    timeout = "600s"
+
+    vpc_access {
+      network_interfaces {
+        network    = google_compute_network.aeromontek_vpc.name
+        subnetwork = google_compute_subnetwork.classifier_subnet.name
+      }
+      egress = "ALL_TRAFFIC"
     }
 
     labels = {
@@ -441,7 +486,7 @@ resource "google_cloud_run_v2_service" "classifier" {
     }
   }
 
-  ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  ingress      = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   launch_stage = "GA"
 }
 
@@ -475,6 +520,16 @@ resource "google_cloud_run_v2_service_iam_member" "frontend_invokes_classifier" 
   member   = "serviceAccount:${google_service_account.frontend[0].email}"
 }
 
+# NEW: Classifier can invoke Spring Boot (bidirectional communication)
+resource "google_cloud_run_v2_service_iam_member" "classifier_invokes_springboot" {
+  count    = var.enable_springboot && var.enable_classifier ? 1 : 0
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.springboot[0].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.classifier[0].email}"
+}
+
 # =============================================================================
 # Pub/Sub Topics
 # =============================================================================
@@ -493,7 +548,7 @@ resource "google_pubsub_subscription" "classifier_request_sub" {
   name    = "document-classification-request-python-sub"
   topic   = google_pubsub_topic.topics["document-classification-request"].name
 
-  ack_deadline_seconds = 300
+  ack_deadline_seconds       = 300
   message_retention_duration = "604800s" # 7 days
 }
 
@@ -503,7 +558,7 @@ resource "google_pubsub_subscription" "result_springboot_sub" {
   name    = "document-classification-result-springboot-sub"
   topic   = google_pubsub_topic.topics["document-classification-result"].name
 
-  ack_deadline_seconds = 300
+  ack_deadline_seconds       = 300
   message_retention_duration = "604800s"
 }
 
@@ -513,7 +568,7 @@ resource "google_pubsub_subscription" "progress_firebase_sub" {
   name    = "document-classification-progress-firebase-sub"
   topic   = google_pubsub_topic.topics["document-classification-progress"].name
 
-  ack_deadline_seconds = 60
+  ack_deadline_seconds       = 60
   message_retention_duration = "86400s" # 1 day
 }
 
@@ -527,9 +582,14 @@ resource "google_eventarc_trigger" "storage_springboot" {
   project  = var.project_id
 
   matching_criteria {
-    type   = "google.cloud.pubsub.topic.v1.messagePublished"
     attribute = "type"
-    value  = "google.cloud.pubsub.topic.v1.messagePublished"
+    value     = "google.cloud.pubsub.topic.v1.messagePublished"
+  }
+
+  transport {
+    pubsub {
+      topic = google_pubsub_topic.topics["storage-finalize-events"].id
+    }
   }
 
   destination {
@@ -550,9 +610,14 @@ resource "google_eventarc_trigger" "storage_classifier" {
   project  = var.project_id
 
   matching_criteria {
-    type   = "google.cloud.pubsub.topic.v1.messagePublished"
     attribute = "type"
-    value  = "google.cloud.pubsub.topic.v1.messagePublished"
+    value     = "google.cloud.pubsub.topic.v1.messagePublished"
+  }
+
+  transport {
+    pubsub {
+      topic = google_pubsub_topic.topics["storage-finalize-events"].id
+    }
   }
 
   destination {
@@ -591,5 +656,5 @@ resource "google_cloudbuild_trigger" "main_trigger" {
     _REGION        = var.region
   }
 
-  include_build_logs = true
+  include_build_logs = "INCLUDE_BUILD_LOGS_WITH_STATUS"
 }

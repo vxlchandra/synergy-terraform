@@ -15,6 +15,32 @@ variable "region" {
   default     = "us-east4"
 }
 
+# ─── VPC & Networking ────────────────────────────────────────────────────────
+variable "vpc_name" {
+  description = "VPC network name"
+  type        = string
+  default     = "aeromontek-vpc"
+}
+
+variable "springboot_subnet_cidr" {
+  description = "CIDR range for Spring Boot subnet"
+  type        = string
+  default     = "10.10.0.0/24"
+}
+
+variable "classifier_subnet_cidr" {
+  description = "CIDR range for Classifier subnet"
+  type        = string
+  default     = "10.10.1.0/24"
+}
+
+variable "private_svc_subnet_cidr" {
+  description = "CIDR range for private service connection (Cloud SQL)"
+  type        = string
+  default     = "10.10.2.0/24"
+}
+
+# ─── Cloud SQL ───────────────────────────────────────────────────────────────
 variable "cloud_sql_instance_name" {
   description = "Existing Cloud SQL PostgreSQL instance name"
   type        = string
@@ -25,6 +51,37 @@ variable "cloud_sql_database" {
   description = "Database name within the Cloud SQL instance"
   type        = string
   default     = "zsynergy"
+}
+
+variable "cloud_sql_user" {
+  description = "Database user for Cloud SQL"
+  type        = string
+  default     = "appuser"
+}
+
+variable "cloud_sql_tier" {
+  description = "Cloud SQL machine type (e.g., db-g1-small, db-custom-2-8192)"
+  type        = string
+  default     = "db-g1-small"
+}
+
+variable "cloud_sql_version" {
+  description = "PostgreSQL version for Cloud SQL"
+  type        = string
+  default     = "POSTGRES_15"
+}
+
+# ─── Storage Buckets ─────────────────────────────────────────────────────────
+variable "documents_bucket_name" {
+  description = "GCS bucket name for documents"
+  type        = string
+  default     = "zsynergy-documents"
+}
+
+variable "uploads_bucket_name" {
+  description = "GCS bucket name for uploads"
+  type        = string
+  default     = "zsynergy-uploads"
 }
 
 variable "repo_location" {
@@ -192,6 +249,8 @@ variable "enabled_apis" {
     "iam.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "apphosting.googleapis.com",
+    "firebase.googleapis.com",
+    "firestore.googleapis.com",
     "cloudkms.googleapis.com",
     "logging.googleapis.com",
     "monitoring.googleapis.com",
@@ -199,6 +258,7 @@ variable "enabled_apis" {
     "cloudtrace.googleapis.com",
     "sqladmin.googleapis.com",
     "servicenetworking.googleapis.com",
+    "compute.googleapis.com",
   ]
 }
 

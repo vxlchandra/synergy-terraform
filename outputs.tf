@@ -2,6 +2,49 @@
 # outputs.tf — ZSynergy / AeroMontek Terraform Outputs
 # =============================================================================
 
+# ─── VPC & Networking ────────────────────────────────────────────────────
+output "vpc_id" {
+  description = "VPC network ID"
+  value       = google_compute_network.aeromontek_vpc.id
+}
+
+output "springboot_subnet_id" {
+  description = "Spring Boot subnet ID"
+  value       = google_compute_subnetwork.springboot_subnet.id
+}
+
+output "classifier_subnet_id" {
+  description = "Classifier subnet ID"
+  value       = google_compute_subnetwork.classifier_subnet.id
+}
+
+# ─── Cloud SQL ───────────────────────────────────────────────────────────
+output "cloud_sql_instance_name" {
+  description = "Cloud SQL instance name"
+  value       = google_sql_database_instance.postgres.name
+}
+
+output "cloud_sql_private_ip" {
+  description = "Cloud SQL private IP address"
+  value       = google_sql_database_instance.postgres.private_ip_address
+}
+
+output "cloud_sql_connection_name" {
+  description = "Cloud SQL connection name (for Auth Proxy)"
+  value       = google_sql_database_instance.postgres.connection_name
+}
+
+# ─── Storage Buckets ────────────────────────────────────────────────────
+output "documents_bucket_url" {
+  description = "GCS documents bucket URL"
+  value       = google_storage_bucket.documents.url
+}
+
+output "uploads_bucket_url" {
+  description = "GCS uploads bucket URL"
+  value       = google_storage_bucket.uploads.url
+}
+
 # ─── Artifact Registry ───────────────────────────────────────────────────
 output "artifact_registry_uri" {
   description = "Artifact Registry Docker repository URI"
@@ -54,9 +97,9 @@ output "pubsub_topic_ids" {
 output "pubsub_subscription_ids" {
   description = "Pub/Sub subscription IDs"
   value = {
-    classifier_request  = var.enable_classifier ? google_pubsub_subscription.classifier_request_sub[0].id : "disabled"
-    result_springboot   = var.enable_springboot ? google_pubsub_subscription.result_springboot_sub[0].id : "disabled"
-    progress_firebase   = var.enable_firebase_functions ? google_pubsub_subscription.progress_firebase_sub[0].id : "disabled"
+    classifier_request = var.enable_classifier ? google_pubsub_subscription.classifier_request_sub[0].id : "disabled"
+    result_springboot  = var.enable_springboot ? google_pubsub_subscription.result_springboot_sub[0].id : "disabled"
+    progress_firebase  = var.enable_firebase_functions ? google_pubsub_subscription.progress_firebase_sub[0].id : "disabled"
   }
 }
 
@@ -96,15 +139,17 @@ output "iam_summary" {
       "roles/cloudsql.client",
       "roles/pubsub.publisher",
       "roles/pubsub.subscriber",
-      "roles/storage.objectViewer",
+      "roles/storage.objectCreator",
       "roles/datastore.user",
       "roles/secretmanager.secretAccessor",
     ]
     classifier = var.enable_classifier ? google_service_account.classifier[0].email : "disabled"
     classifier_roles = [
+      "roles/run.invoker (on springboot)",
+      "roles/cloudsql.client",
       "roles/pubsub.publisher",
       "roles/pubsub.subscriber",
-      "roles/storage.objectViewer",
+      "roles/storage.objectCreator",
       "roles/datastore.user",
       "roles/logging.logWriter",
       "roles/secretmanager.secretAccessor",

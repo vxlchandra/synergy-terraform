@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mv COMMIT_EDITMSG .git/)",
+      "Bash(mv FETCH_HEAD .git/)",
+      "Bash(mv HEAD .git/HEAD.restored)",
+      "Bash(mv index *)",
+      "Bash(mv commit-graph *)",
+      "Bash(git hash-object *)",
+      "Bash(git reset *)",
+      "Bash(git add *)",
+      "Bash(git rm *)",
+      "Bash(git restore *)"
+    ]
+  }
+}
