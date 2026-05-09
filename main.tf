@@ -49,6 +49,11 @@ provider "google-beta" {
   region  = var.region
 }
 
+# Needed to resolve project number for the Pub/Sub service agent SA.
+data "google_project" "project" {
+  project_id = var.project_id
+}
+
 # =============================================================================
 # Enable Required APIs
 # =============================================================================
@@ -164,10 +169,12 @@ resource "google_project_iam_member" "classifier_pubsub_sub" {
 
 # NOTE: pubsub.editor and pubsub.viewer removed — covered by publisher + subscriber roles above
 
+# objectAdmin gives the classifier SA read + write + delete on GCS objects
+# so it can both restore (read) and save (write/overwrite) the ChromaDB snapshot.
 resource "google_project_iam_member" "classifier_storage" {
   count   = var.enable_classifier ? 1 : 0
   project = var.project_id
-  role    = "roles/storage.objectCreator"
+  role    = "roles/storage.objectAdmin"
   member  = "serviceAccount:${google_service_account.classifier[0].email}"
 }
 
@@ -342,8 +349,11 @@ resource "google_cloud_run_v2_service" "springboot" {
     }
   }
 
-  # Public ingress (authenticated via Firebase JWT at app level)
-  ingress = "INGRESS_TRAFFIC_ALL"
+  # Internal-only ingress; UI traffic enters via the Firebase App Hosting
+  # load balancer, which counts as INTERNAL_LOAD_BALANCER. Aligns with
+  # cloudbuild.yaml deploy step (--ingress internal --no-allow-unauthenticated).
+  # See docs/CLOUD_READY_DESIGN.md §1.1 + §14 finding #1.
+  ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
 
   launch_stage = "GA"
 }
@@ -382,11 +392,47 @@ resource "google_cloud_run_v2_service" "classifier" {
       }
       env {
         name  = "MAX_WORKERS"
-        value = "5"
+        value = var.classifier_max_workers
       }
       env {
-        name  = "CHROMADB_TELEMETRY"
-        value = "FALSE"
+        name  = "MAX_EXTRACTION_WORKERS"
+        value = var.classifier_extraction_workers
+      }
+      env {
+        name  = "MAX_CLASSIFICATION_WORKERS"
+        value = var.classifier_classification_workers
+      }
+      # ANONYMIZED_TELEMETRY is the correct ChromaDB >=0.4 env var.
+      # The old CHROMADB_TELEMETRY=FALSE had no effect.
+      env {
+        name  = "ANONYMIZED_TELEMETRY"
+        value = "False"
+      }
+      # GCS bucket for ChromaDB snapshot persistence.
+      # Prevents re-embedding the IATA spec on every cold start.
+      env {
+        name  = "CHROMA_SNAPSHOT_BUCKET"
+        value = var.classifier_chroma_snapshot_bucket
+      }
+      env {
+        name  = "FLOW_CONTROL_MAX_MESSAGES"
+        value = var.classifier_flow_control_max_messages
+      }
+      env {
+        name  = "AUTO_CREATE_PUBSUB_RESOURCES"
+        value = "false"
+      }
+      # Service account used in the Pub/Sub push subscription OIDC token.
+      # Matches the SA email passed to google_pubsub_subscription.classifier_request_sub.
+      env {
+        name  = "PUSH_SA_EMAIL"
+        value = google_service_account.classifier[0].email
+      }
+      # Push endpoint URL for this service — set after first deploy.
+      # Used for reference; Terraform owns the subscription (AUTO_CREATE_PUBSUB_RESOURCES=false).
+      env {
+        name  = "PUSH_ENDPOINT_URL"
+        value = var.classifier_push_endpoint_url
       }
 
       env {
@@ -530,6 +576,26 @@ resource "google_cloud_run_v2_service_iam_member" "classifier_invokes_springboot
   member   = "serviceAccount:${google_service_account.classifier[0].email}"
 }
 
+# Pub/Sub push delivery: grant the classifier SA the right to invoke its own Cloud Run service.
+# The push subscription OIDC token uses this SA, so Cloud Run must accept it as an invoker.
+resource "google_cloud_run_v2_service_iam_member" "pubsub_push_invokes_classifier" {
+  count    = var.enable_classifier ? 1 : 0
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.classifier[0].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.classifier[0].email}"
+}
+
+# Allow the GCP Pub/Sub service agent to generate OIDC tokens for the classifier SA.
+# Required for authenticated push subscription delivery.
+resource "google_service_account_iam_member" "pubsub_agent_uses_classifier_sa" {
+  count              = var.enable_classifier ? 1 : 0
+  service_account_id = google_service_account.classifier[0].name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+}
+
 # =============================================================================
 # Pub/Sub Topics
 # =============================================================================
@@ -550,6 +616,27 @@ resource "google_pubsub_subscription" "classifier_request_sub" {
 
   ack_deadline_seconds       = 300
   message_retention_duration = "604800s" # 7 days
+
+  # Push subscription (preferred for Cloud Run minScale=0 — Pub/Sub wakes the instance).
+  # Set var.classifier_push_endpoint_url after first deploy to activate push mode.
+  # When the variable is empty, a pull subscription is created (safe default for initial deploy).
+  dynamic "push_config" {
+    for_each = var.classifier_push_endpoint_url != "" ? [1] : []
+    content {
+      push_endpoint = var.classifier_push_endpoint_url
+      oidc_token {
+        service_account_email = google_service_account.classifier[0].email
+        audience              = var.classifier_push_endpoint_url
+      }
+    }
+  }
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.topics["document-classification-request-dlq"].id
+    max_delivery_attempts = 5
+  }
+
+  depends_on = [google_pubsub_topic.topics]
 }
 
 resource "google_pubsub_subscription" "result_springboot_sub" {

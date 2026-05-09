@@ -192,9 +192,9 @@ variable "springboot_min_instances" {
 }
 
 variable "springboot_max_instances" {
-  description = "Maximum instances for Spring Boot"
+  description = "Maximum instances for Spring Boot. Spec: 0..12 (CLOUD_READY_DESIGN §13.1)."
   type        = number
-  default     = 10
+  default     = 12
 }
 
 # ─── Cloud Run — Classifier ──────────────────────────────────────────────
@@ -223,15 +223,45 @@ variable "classifier_concurrency" {
 }
 
 variable "classifier_min_instances" {
-  description = "Minimum instances for Classifier"
+  description = "Minimum instances for Classifier (0 = scale to zero, 1+ = always warm)"
   type        = number
   default     = 0
 }
 
 variable "classifier_max_instances" {
-  description = "Maximum instances for Classifier"
+  description = "Maximum instances for Classifier. Spec: 0..12 (CLOUD_READY_DESIGN §13.1)."
   type        = number
-  default     = 10
+  default     = 12
+}
+
+variable "classifier_max_workers" {
+  description = "MAX_WORKERS — parallel documents per Pub/Sub message within one instance"
+  type        = string
+  default     = "5"
+}
+
+variable "classifier_extraction_workers" {
+  description = "MAX_EXTRACTION_WORKERS — threads in EXTRACTION_POOL per instance"
+  type        = string
+  default     = "10"
+}
+
+variable "classifier_classification_workers" {
+  description = "MAX_CLASSIFICATION_WORKERS — threads in CLASSIFICATION_POOL per instance"
+  type        = string
+  default     = "10"
+}
+
+variable "classifier_flow_control_max_messages" {
+  description = "FLOW_CONTROL_MAX_MESSAGES — max in-flight Pub/Sub messages per instance"
+  type        = string
+  default     = "10"
+}
+
+variable "classifier_chroma_snapshot_bucket" {
+  description = "GCS bucket for ChromaDB snapshots (prevents re-embedding on cold start)"
+  type        = string
+  default     = ""   # Falls back to GCS_BUCKET if set; empty = no GCS persistence
 }
 
 # ─── APIs ────────────────────────────────────────────────────────────────
@@ -276,17 +306,63 @@ variable "secret_names" {
   ]
 }
 
+# ─── Monitoring / Alerting ──────────────────────────────────────────────
+variable "alert_email_recipients" {
+  description = "Email addresses that receive DLQ + reliability alerts. Leave [] to skip alert wiring."
+  type        = list(string)
+  default     = []
+}
+
+variable "alert_dlq_depth_threshold" {
+  description = "DLQ depth that triggers an alert (sustained for window)."
+  type        = number
+  default     = 1
+}
+
+variable "alert_dlq_window_seconds" {
+  description = "Sustained-window for DLQ-depth alert."
+  type        = number
+  default     = 300
+}
+
 # ─── Pub/Sub ─────────────────────────────────────────────────────────────
 variable "pubsub_topics" {
   description = "Pub/Sub topics to create"
   type        = list(string)
   default = [
     "document-classification-request",
+    "document-classification-request-dlq",
     "document-classification-result",
+    "document-classification-result-dlq",
     "document-classification-progress",
+    "document-classification-progress-dlq",
     "storage-finalize-events",
     "invoice-events",
+    "email-outbox",
+    "email-outbox-dlq",
   ]
+}
+
+variable "dlq_topic_names" {
+  description = "Subset of pubsub_topics that are DLQs — used to wire alerts."
+  type        = list(string)
+  default = [
+    "document-classification-request-dlq",
+    "document-classification-result-dlq",
+    "document-classification-progress-dlq",
+    "email-outbox-dlq",
+  ]
+}
+
+variable "classifier_push_endpoint_url" {
+  description = <<-EOT
+    HTTPS URL for Pub/Sub push delivery to the classifier, e.g.
+    "https://classifier-abc-uk.a.run.app/pubsub/push".
+    Set this after the first Cloud Run deploy when the service URL is known.
+    When empty (default), a pull subscription is used — safe for initial deploy.
+  EOT
+  type    = string
+  default = ""
 }
 
 variable "pubsub_retention_duration" {
