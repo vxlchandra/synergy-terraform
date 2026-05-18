@@ -58,6 +58,10 @@ classifier_concurrency   = 5
 classifier_min_instances = 0
 classifier_max_instances = 10
 
+# ─── Monitoring & Alerts ────────────────────────────────────────────────
+# Activates DLQ depth alerts in monitoring.tf. Empty list = no alerts.
+alert_email_recipients = ["sales-zsds@zsds.io", "chandra@vxlllc.com"]
+
 # ─── Cloud Build Trigger (optional) ──────────────────────────────────────
 github_owner  = "zsds"
 github_repo   = "gcp-builds"
