@@ -349,11 +349,12 @@ resource "google_cloud_run_v2_service" "springboot" {
     }
   }
 
-  # Internal-only ingress; UI traffic enters via the Firebase App Hosting
-  # load balancer, which counts as INTERNAL_LOAD_BALANCER. Aligns with
-  # cloudbuild.yaml deploy step (--ingress internal --no-allow-unauthenticated).
-  # See docs/CLOUD_READY_DESIGN.md §1.1 + §14 finding #1.
-  ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  # Ingress: all traffic allowed. Firebase App Hosting cannot issue OIDC
+  # identity tokens, so Cloud Run IAM with allUsers + app-layer auth
+  # (Spring Boot FirebaseAuthFilter) is the working pattern. Network-layer
+  # gate deferred to Cloud Armor + Global LB phase.
+  # See docs/ROLLBACK_CHUNK_AND_MERGE.md, session notes 2026-05-18.
+  ingress = "INGRESS_TRAFFIC_ALL"
 
   launch_stage = "GA"
 }
@@ -564,6 +565,30 @@ resource "google_cloud_run_v2_service_iam_member" "frontend_invokes_classifier" 
   name     = google_cloud_run_v2_service.classifier[0].name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.frontend[0].email}"
+}
+
+# App Hosting SA invokes Spring Boot API — Firebase App Hosting runs as
+# this SA. It cannot issue OIDC identity tokens, so allUsers is also
+# required on the API service (app-layer auth is the gate).
+resource "google_cloud_run_v2_service_iam_member" "apphosting_invokes_springboot" {
+  count    = var.enable_springboot ? 1 : 0
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.springboot[0].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:firebase-app-hosting-compute@${var.project_id}.iam.gserviceaccount.com"
+}
+
+# allUsers invokes Spring Boot API — required because App Hosting cannot
+# issue OIDC tokens. Spring Boot FirebaseAuthFilter validates every request.
+# Remove when Cloud Armor + Global LB is in place.
+resource "google_cloud_run_v2_service_iam_member" "public_invokes_springboot" {
+  count    = var.enable_springboot ? 1 : 0
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.springboot[0].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }
 
 # NEW: Classifier can invoke Spring Boot (bidirectional communication)
