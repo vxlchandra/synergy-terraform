@@ -770,3 +770,43 @@ resource "google_cloudbuild_trigger" "main_trigger" {
 
   include_build_logs = "INCLUDE_BUILD_LOGS_WITH_STATUS"
 }
+
+# =============================================================================
+# Cloud Scheduler: Weekly aviation reference data refresh
+# =============================================================================
+# Triggers POST to /api/v1/admin/reference/refresh on the Spring Boot API.
+# Cloud Scheduler authenticates via OIDC token from the Spring Boot SA,
+# which has run.invoker on the API service. The admin endpoint validates
+# the token via AdminDualAuthFilter (Google OIDC path).
+#
+# Schedule: Sunday 03:00 UTC (configurable via variable).
+# Timeout: 600s (data download + bulk insert can take 2-5 min).
+
+resource "google_cloud_scheduler_job" "reference_refresh" {
+  count    = var.enable_springboot ? 1 : 0
+  project  = var.project_id
+  region   = var.region
+  name     = "reference-data-weekly-refresh"
+
+  description = "Weekly aviation reference data refresh (FAA + OpenSky + airports)"
+  schedule    = var.reference_refresh_cron
+  time_zone   = "UTC"
+
+  retry_config {
+    retry_count          = 2
+    min_backoff_duration = "30s"
+    max_backoff_duration = "300s"
+  }
+
+  http_target {
+    http_method = "POST"
+    uri         = "${google_cloud_run_v2_service.springboot[0].uri}/api/v1/admin/reference/refresh"
+
+    oidc_token {
+      service_account_email = google_service_account.springboot[0].email
+      audience              = google_cloud_run_v2_service.springboot[0].uri
+    }
+  }
+
+  depends_on = [google_cloud_run_v2_service.springboot]
+}

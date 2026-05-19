@@ -389,3 +389,12 @@ variable "github_branch" {
   type        = string
   default     = "main"
 }
+
+# =============================================================================
+# Aviation Reference Data
+# =============================================================================
+variable "reference_refresh_cron" {
+  description = "Cloud Scheduler cron for weekly reference data refresh. Default: Sunday 3 AM UTC."
+  type        = string
+  default     = "0 3 * * 0"
+}
