@@ -49,7 +49,17 @@ resource "google_storage_bucket" "uploads" {
 
   uniform_bucket_level_access = true
   versioning {
-    enabled = false
+    enabled = true
+  }
+
+  # Keep 3 versions of uploads (less than documents — uploads are transient)
+  lifecycle_rule {
+    condition {
+      num_newer_versions = 3
+    }
+    action {
+      type = "Delete"
+    }
   }
 
   lifecycle_rule {
