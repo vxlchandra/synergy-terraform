@@ -15,10 +15,16 @@ resource "google_secret_manager_secret_version" "db_password" {
 }
 
 # Cloud SQL PostgreSQL Instance
+# NOTE: imported from production. Config represents TARGET state (private IP).
+# lifecycle ignore_changes prevents drift until VPC Direct migration is ready.
 resource "google_sql_database_instance" "postgres" {
   name             = var.cloud_sql_instance_name
   database_version = var.cloud_sql_version
   region           = var.region
+
+  lifecycle {
+    ignore_changes = all
+  }
   project          = var.project_id
 
   deletion_protection = true
@@ -30,10 +36,12 @@ resource "google_sql_database_instance" "postgres" {
     disk_size         = 50
 
     ip_configuration {
-      # Private IP only — no public IP
+      # Private IP only — no public IP. Eliminates Google suspicious activity alerts.
       ipv4_enabled    = false
       private_network = google_compute_network.aeromontek_vpc.id
-      require_ssl     = false
+      require_ssl     = true
+      ssl_mode        = "ENCRYPTED_ONLY"
+      enable_private_path_for_google_cloud_services = true
     }
 
     backup_configuration {
@@ -79,11 +87,16 @@ resource "google_sql_database" "app_db" {
 }
 
 # Create database user for application
+# Password managed via gcloud/Secret Manager, not Terraform.
 resource "google_sql_user" "app_user" {
   name     = var.cloud_sql_user
   instance = google_sql_database_instance.postgres.name
   password = random_password.db_password.result
   project  = var.project_id
+
+  lifecycle {
+    ignore_changes = [password]
+  }
 }
 
 # Grant Secret Manager access to Spring Boot SA for DB password

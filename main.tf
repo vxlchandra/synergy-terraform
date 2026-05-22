@@ -32,11 +32,12 @@ terraform {
     }
   }
 
-  # backend "gcs" {
-  #   # Use a GCS bucket for state storage
-  #   # bucket = "zsds-terraform-state"
-  #   # prefix = "terraform/state"
-  # }
+  # Remote state in GCS — uncomment after running backend-bootstrap/
+  # then: terraform init -migrate-state
+  backend "gcs" {
+    bucket = "zsds-terraform-state"
+    prefix = "terraform/state/zsynergy"
+  }
 }
 
 provider "google" {
@@ -261,6 +262,11 @@ resource "google_cloud_run_v2_service" "springboot" {
   location = var.region
   project  = var.project_id
 
+  # Managed by deploy_gcp.sh, not Terraform. Ignore all drift.
+  lifecycle {
+    ignore_changes = all
+  }
+
   template {
     service_account = google_service_account.springboot[0].email
 
@@ -302,7 +308,8 @@ resource "google_cloud_run_v2_service" "springboot" {
 
       env {
         name  = "DB_HOST"
-        value = "/cloudsql/${var.project_id}:${var.region}:${var.cloud_sql_instance_name}"
+        # Private IP via VPC Direct — no Cloud SQL Proxy sidecar needed
+        value = google_sql_database_instance.postgres.private_ip_address
       }
 
       env {
@@ -334,6 +341,10 @@ resource "google_cloud_run_v2_service" "springboot" {
 
     timeout = "300s"
 
+    # VPC Direct — routes DB traffic through private network.
+    # Requires: Cloud SQL private IP on aeromontek-vpc (defined in cloudsql.tf).
+    # NOTE: Do NOT apply this until `terraform apply` creates the private IP.
+    # After apply: Cloud Run → VPC → Cloud SQL private IP (no public exposure).
     vpc_access {
       network_interfaces {
         network    = google_compute_network.aeromontek_vpc.name
@@ -349,11 +360,11 @@ resource "google_cloud_run_v2_service" "springboot" {
     }
   }
 
-  # Ingress: all traffic allowed. Firebase App Hosting cannot issue OIDC
-  # identity tokens, so Cloud Run IAM with allUsers + app-layer auth
-  # (Spring Boot FirebaseAuthFilter) is the working pattern. Network-layer
-  # gate deferred to Cloud Armor + Global LB phase.
-  # See docs/ROLLBACK_CHUNK_AND_MERGE.md, session notes 2026-05-18.
+  # Ingress: all traffic. Firebase App Hosting does NOT route as "internal"
+  # to Cloud Run — it's a separate Google service that sends external HTTPS.
+  # Network-layer lockdown requires Global External ALB + Cloud Armor.
+  # App-layer security: Spring Boot FirebaseAuthFilter validates JWT on every request.
+  # All endpoints require a valid Firebase ID token except /actuator/health/*.
   ingress = "INGRESS_TRAFFIC_ALL"
 
   launch_stage = "GA"
@@ -365,6 +376,11 @@ resource "google_cloud_run_v2_service" "classifier" {
   name     = var.classifier_service_name
   location = var.region
   project  = var.project_id
+
+  # Managed by deploy_gcp.sh, not Terraform. Ignore all drift.
+  lifecycle {
+    ignore_changes = all
+  }
 
   template {
     service_account = google_service_account.classifier[0].email

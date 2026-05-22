@@ -21,9 +21,9 @@ private_svc_subnet_cidr = "10.10.2.0/24"
 # ─── Cloud SQL ──────────────────────────────────────────────────────────────
 cloud_sql_instance_name = "zsynergy-pg"
 cloud_sql_database      = "zsynergy"
-cloud_sql_user          = "appuser"
+cloud_sql_user          = "zsynergy"
 cloud_sql_tier          = "db-g1-small"
-cloud_sql_version       = "POSTGRES_15"
+cloud_sql_version       = "POSTGRES_16"
 
 # ─── Storage Buckets ────────────────────────────────────────────────────────
 documents_bucket_name = "zsynergy-documents"
