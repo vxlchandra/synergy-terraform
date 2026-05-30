@@ -55,7 +55,7 @@ resource "google_sql_database_instance" "postgres" {
 
     database_flags {
       name  = "max_connections"
-      value = "100"
+      value = "200"
     }
 
     database_flags {

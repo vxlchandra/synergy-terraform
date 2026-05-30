@@ -170,12 +170,20 @@ resource "google_project_iam_member" "classifier_pubsub_sub" {
 
 # NOTE: pubsub.editor and pubsub.viewer removed — covered by publisher + subscriber roles above
 
-# objectAdmin gives the classifier SA read + write + delete on GCS objects
-# so it can both restore (read) and save (write/overwrite) the ChromaDB snapshot.
-resource "google_project_iam_member" "classifier_storage" {
+# Classifier needs read (PDFs) + create/overwrite (ChromaDB snapshot).
+# objectViewer = get + list. objectCreator = create (overwrite is implicit).
+# No delete permission — prevents accidental or malicious data loss.
+resource "google_project_iam_member" "classifier_storage_viewer" {
   count   = var.enable_classifier ? 1 : 0
   project = var.project_id
-  role    = "roles/storage.objectAdmin"
+  role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${google_service_account.classifier[0].email}"
+}
+
+resource "google_project_iam_member" "classifier_storage_creator" {
+  count   = var.enable_classifier ? 1 : 0
+  project = var.project_id
+  role    = "roles/storage.objectCreator"
   member  = "serviceAccount:${google_service_account.classifier[0].email}"
 }
 
@@ -299,6 +307,11 @@ resource "google_cloud_run_v2_service" "springboot" {
       env {
         name  = "SERVER_PORT"
         value = "8080"
+      }
+      # Centralized CORS — same origins as Classifier (from var.cors_allowed_origins)
+      env {
+        name  = "APP_CORS_ALLOWED_ORIGINS"
+        value = var.cors_allowed_origins
       }
 
       env {
@@ -438,6 +451,11 @@ resource "google_cloud_run_v2_service" "classifier" {
       env {
         name  = "AUTO_CREATE_PUBSUB_RESOURCES"
         value = "false"
+      }
+      # Centralized CORS — same origins as Spring Boot API
+      env {
+        name  = "CORS_ORIGINS"
+        value = var.cors_allowed_origins
       }
       # Service account used in the Pub/Sub push subscription OIDC token.
       # Matches the SA email passed to google_pubsub_subscription.classifier_request_sub.

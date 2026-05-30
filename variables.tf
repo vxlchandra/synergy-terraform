@@ -192,9 +192,9 @@ variable "springboot_min_instances" {
 }
 
 variable "springboot_max_instances" {
-  description = "Maximum instances for Spring Boot. Spec: 0..12 (CLOUD_READY_DESIGN §13.1)."
+  description = "Maximum instances for Spring Boot. Starter tier: 10 (cost cap)."
   type        = number
-  default     = 12
+  default     = 10
 }
 
 # ─── Cloud Run — Classifier ──────────────────────────────────────────────
@@ -262,6 +262,13 @@ variable "classifier_chroma_snapshot_bucket" {
   description = "GCS bucket for ChromaDB snapshots (prevents re-embedding on cold start)"
   type        = string
   default     = ""   # Falls back to GCS_BUCKET if set; empty = no GCS persistence
+}
+
+# ─── CORS (Centralized — shared by Spring Boot API + Classifier) ────────
+variable "cors_allowed_origins" {
+  description = "Comma-separated CORS origins. Passed to both Cloud Run services via env var."
+  type        = string
+  default     = "https://synergy.zsds.io,https://zsynergy--zsynergy.us-east4.hosted.app,https://zsynergy.web.app,https://zsynergy.firebaseapp.com"
 }
 
 # ─── APIs ────────────────────────────────────────────────────────────────
