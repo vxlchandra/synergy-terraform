@@ -67,7 +67,7 @@ resource "google_compute_security_policy" "api_waf" {
 
   # ─── Rule 3: Block large request bodies (>10 MB) ──────────────────────
   rule {
-    action   = "deny(413)"
+    action   = "deny(403)"
     priority = 3000
     match {
       expr {
