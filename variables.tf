@@ -317,7 +317,11 @@ variable "secret_names" {
 variable "alert_email_recipients" {
   description = "Email addresses that receive DLQ + reliability alerts. Leave [] to skip alert wiring."
   type        = list(string)
-  default     = []
+  default = [
+    "chandra@vxlllc.com",
+    "synergy-admin-group@vxlllc.com",
+    "synergy-ops-admin-group@vxlllc.com",
+  ]
 }
 
 variable "alert_dlq_depth_threshold" {
