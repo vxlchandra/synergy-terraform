@@ -54,8 +54,8 @@ resource "google_storage_bucket" "terraform_state" {
 
   lifecycle_rule {
     condition {
-      age                   = 90
-      with_state            = "ARCHIVED"
+      age        = 90
+      with_state = "ARCHIVED"
     }
     action {
       type = "Delete"

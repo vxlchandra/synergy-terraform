@@ -25,7 +25,7 @@ resource "google_sql_database_instance" "postgres" {
   lifecycle {
     ignore_changes = all
   }
-  project          = var.project_id
+  project = var.project_id
 
   deletion_protection = true
 
@@ -37,10 +37,10 @@ resource "google_sql_database_instance" "postgres" {
 
     ip_configuration {
       # Private IP only — no public IP. Eliminates Google suspicious activity alerts.
-      ipv4_enabled    = false
-      private_network = google_compute_network.aeromontek_vpc.id
-      require_ssl     = true
-      ssl_mode        = "ENCRYPTED_ONLY"
+      ipv4_enabled                                  = false
+      private_network                               = google_compute_network.aeromontek_vpc.id
+      require_ssl                                   = true
+      ssl_mode                                      = "ENCRYPTED_ONLY"
       enable_private_path_for_google_cloud_services = true
     }
 

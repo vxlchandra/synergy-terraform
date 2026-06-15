@@ -320,7 +320,7 @@ resource "google_cloud_run_v2_service" "springboot" {
       }
 
       env {
-        name  = "DB_HOST"
+        name = "DB_HOST"
         # Private IP via VPC Direct — no Cloud SQL Proxy sidecar needed
         value = google_sql_database_instance.postgres.private_ip_address
       }
@@ -817,10 +817,10 @@ resource "google_cloudbuild_trigger" "main_trigger" {
 # Timeout: 600s (data download + bulk insert can take 2-5 min).
 
 resource "google_cloud_scheduler_job" "reference_refresh" {
-  count    = var.enable_springboot ? 1 : 0
-  project  = var.project_id
-  region   = var.region
-  name     = "reference-data-weekly-refresh"
+  count   = var.enable_springboot ? 1 : 0
+  project = var.project_id
+  region  = var.region
+  name    = "reference-data-weekly-refresh"
 
   description = "Weekly aviation reference data refresh (FAA + OpenSky + airports)"
   schedule    = var.reference_refresh_cron

@@ -261,7 +261,7 @@ variable "classifier_flow_control_max_messages" {
 variable "classifier_chroma_snapshot_bucket" {
   description = "GCS bucket for ChromaDB snapshots (prevents re-embedding on cold start)"
   type        = string
-  default     = ""   # Falls back to GCS_BUCKET if set; empty = no GCS persistence
+  default     = "" # Falls back to GCS_BUCKET if set; empty = no GCS persistence
 }
 
 # ─── CORS (Centralized — shared by Spring Boot API + Classifier) ────────
@@ -372,8 +372,8 @@ variable "classifier_push_endpoint_url" {
     Set this after the first Cloud Run deploy when the service URL is known.
     When empty (default), a pull subscription is used — safe for initial deploy.
   EOT
-  type    = string
-  default = ""
+  type        = string
+  default     = ""
 }
 
 variable "pubsub_retention_duration" {
