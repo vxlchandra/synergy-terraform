@@ -80,6 +80,7 @@ resource "google_storage_bucket" "uploads" {
 
 # GCS notification: documents bucket finalize events → Pub/Sub topic
 resource "google_storage_notification" "documents_finalize" {
+  count          = var.enable_gcs_finalize_notification ? 1 : 0
   bucket         = google_storage_bucket.documents.name
   payload_format = "JSON_API_V1"
   topic          = google_pubsub_topic.topics["storage-finalize-events"].id
@@ -90,6 +91,7 @@ resource "google_storage_notification" "documents_finalize" {
 
 # GCS service account → allow publishing to Pub/Sub
 resource "google_pubsub_topic_iam_member" "gcs_publish" {
+  count  = var.enable_gcs_finalize_notification ? 1 : 0
   topic  = google_pubsub_topic.topics["storage-finalize-events"].id
   role   = "roles/pubsub.publisher"
   member = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-cloud-storage.iam.gserviceaccount.com"

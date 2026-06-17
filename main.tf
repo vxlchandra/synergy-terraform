@@ -69,6 +69,35 @@ resource "google_project_service" "required_apis" {
 # =============================================================================
 # Artifact Registry
 # =============================================================================
+# Shared FinOps cleanup rules — STARTUP-SAFE BY CONSTRUCTION.
+# Cloud Run pins images by DIGEST; once :latest advances, a live revision's
+# serving digest becomes UNTAGGED. So the rules must NEVER delete a tagged
+# image and must keep a deep recent window covering serving + rollback digests:
+#   1. KEEP the N most-recent versions per image  → covers serving + rollback
+#   2. DELETE only UNTAGGED versions older than X  → orphaned intermediate layers
+# There is deliberately NO "delete ANY/tagged" rule — that is what would erase
+# an in-use release image. Tag deploys with the build SHA to make them immortal.
+# Stays in dry-run (log-only) until var.ar_cleanup_dry_run = false, and only
+# after the pre-enforcement digest audit (see scripts/finops/) passes.
+locals {
+  ar_cleanup_rules = [
+    {
+      id         = "keep-recent-${var.ar_cleanup_keep_count}"
+      action     = "KEEP"
+      keep_count = var.ar_cleanup_keep_count
+      tag_state  = null
+      older_than = null
+    },
+    {
+      id         = "delete-untagged"
+      action     = "DELETE"
+      keep_count = null
+      tag_state  = "UNTAGGED"
+      older_than = var.ar_cleanup_untagged_older_than
+    },
+  ]
+}
+
 resource "google_artifact_registry_repository" "docker_repo" {
   count         = var.enable_artifact_registry ? 1 : 0
   location      = var.repo_location
@@ -80,6 +109,81 @@ resource "google_artifact_registry_repository" "docker_repo" {
   docker_config {
     immutable_tags = false
   }
+
+  cleanup_policy_dry_run = var.ar_cleanup_dry_run
+
+  dynamic "cleanup_policies" {
+    for_each = { for r in local.ar_cleanup_rules : r.id => r }
+    content {
+      id     = cleanup_policies.value.id
+      action = cleanup_policies.value.action
+
+      dynamic "most_recent_versions" {
+        for_each = cleanup_policies.value.keep_count != null ? [1] : []
+        content {
+          keep_count = cleanup_policies.value.keep_count
+        }
+      }
+
+      dynamic "condition" {
+        for_each = cleanup_policies.value.tag_state != null ? [1] : []
+        content {
+          tag_state  = cleanup_policies.value.tag_state
+          older_than = cleanup_policies.value.older_than
+        }
+      }
+    }
+  }
+}
+
+# Standalone aeromontek-api repo (created out-of-band by `gcloud builds submit`).
+# Adopted into Terraform via the import block below so it carries the same
+# cleanup policy declaratively. One-time `terraform apply` reconciles it.
+# Note: gcr.io (legacy) and firebaseapphosting-images are Google-service-managed
+# and intentionally NOT imported — they retain their gcloud-applied policy.
+resource "google_artifact_registry_repository" "aeromontek_api" {
+  count         = var.manage_aeromontek_api_repo ? 1 : 0
+  location      = var.aeromontek_api_repo_location
+  project       = var.project_id
+  repository_id = "aeromontek-api"
+  description   = "AeroMontek API images (adopted)"
+  format        = "DOCKER"
+
+  docker_config {
+    immutable_tags = false
+  }
+
+  cleanup_policy_dry_run = var.ar_cleanup_dry_run
+
+  dynamic "cleanup_policies" {
+    for_each = { for r in local.ar_cleanup_rules : r.id => r }
+    content {
+      id     = cleanup_policies.value.id
+      action = cleanup_policies.value.action
+
+      dynamic "most_recent_versions" {
+        for_each = cleanup_policies.value.keep_count != null ? [1] : []
+        content {
+          keep_count = cleanup_policies.value.keep_count
+        }
+      }
+
+      dynamic "condition" {
+        for_each = cleanup_policies.value.tag_state != null ? [1] : []
+        content {
+          tag_state  = cleanup_policies.value.tag_state
+          older_than = cleanup_policies.value.older_than
+        }
+      }
+    }
+  }
+}
+
+# Adopt the pre-existing aeromontek-api repo (TF 1.5+ import block).
+# If manage_aeromontek_api_repo = false, remove this block too.
+import {
+  to = google_artifact_registry_repository.aeromontek_api[0]
+  id = "projects/${var.project_id}/locations/${var.aeromontek_api_repo_location}/repositories/aeromontek-api"
 }
 
 # =============================================================================

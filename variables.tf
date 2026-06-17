@@ -90,11 +90,54 @@ variable "repo_location" {
   default     = "us"
 }
 
+variable "firestore_location" {
+  description = "Firestore (default) DB location — IMMUTABLE. Live prod = nam5 multi-region."
+  type        = string
+  default     = "nam5"
+}
+
 # ─── Repositories ────────────────────────────────────────────────────────
 variable "repo_name" {
   description = "Artifact Registry Docker repository name"
   type        = string
   default     = "zsynergy"
+}
+
+# ─── Artifact Registry Cleanup Policies (FinOps) ─────────────────────────
+variable "ar_cleanup_keep_count" {
+  description = "Most-recent versions ALWAYS kept per image. Must exceed deploys-between-redeploys so a live revision's (now-untagged) serving digest is never reaped. Default 20."
+  type        = number
+  default     = 20
+}
+
+variable "ar_cleanup_untagged_older_than" {
+  description = "Delete UNTAGGED versions older than this. Must exceed the longest a service stays on one revision (serving digest goes untagged once :latest moves). Default 30d."
+  type        = string
+  default     = "2592000s" # 30d
+}
+
+variable "ar_cleanup_dry_run" {
+  description = "When true, cleanup policies only LOG candidates and never delete"
+  type        = bool
+  default     = true
+}
+
+variable "enable_gcs_finalize_notification" {
+  description = "Activate GCS documents-bucket OBJECT_FINALIZE → Pub/Sub notification + GCS publish grant. Default off: live pipeline uses Firestore doc-triggers; enabling risks double-processing."
+  type        = bool
+  default     = false
+}
+
+variable "manage_aeromontek_api_repo" {
+  description = "Adopt the standalone aeromontek-api AR repo into Terraform (requires import)"
+  type        = bool
+  default     = true
+}
+
+variable "aeromontek_api_repo_location" {
+  description = "Location of the standalone aeromontek-api AR repo"
+  type        = string
+  default     = "us-east4"
 }
 
 # ─── Component Toggles ───────────────────────────────────────────────────
