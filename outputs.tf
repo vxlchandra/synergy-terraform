@@ -156,3 +156,10 @@ output "iam_summary" {
     ]
   }
 }
+
+# Reserved global IP for the API external ALB. Point the api_lb_domain A record
+# here at cutover step 1. Empty string unless enable_api_lb = true.
+output "api_lb_ip_address" {
+  description = "Reserved global anycast IP for the Spring Boot API external ALB (DNS target at cutover)."
+  value       = local.api_lb_enabled == 1 ? google_compute_global_address.api_lb[0].address : ""
+}

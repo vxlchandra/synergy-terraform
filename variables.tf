@@ -183,6 +183,19 @@ variable "enable_cloudbuild_trigger" {
   default     = false
 }
 
+# ─── API Load Balancer + Cloud Armor (staged, see api-loadbalancer.tf) ───────
+variable "enable_api_lb" {
+  description = "Provision the Global External ALB in front of the Spring Boot API with the Cloud Armor WAF attached. Default false: the LB resources are NOT created. Enabling is additive (does not disturb the existing App Hosting path); the DNS + ingress cutover remains a manual step. See api-loadbalancer.tf."
+  type        = bool
+  default     = false
+}
+
+variable "api_lb_domain" {
+  description = "FQDN for the API load balancer's Google-managed SSL certificate (e.g. api.zsds.io). Required (non-empty) when enable_api_lb = true."
+  type        = string
+  default     = ""
+}
+
 # ─── Service Accounts ────────────────────────────────────────────────────
 variable "sa_prefix" {
   description = "Prefix for service account names"
