@@ -352,6 +352,7 @@ variable "enabled_apis" {
     "sqladmin.googleapis.com",
     "servicenetworking.googleapis.com",
     "compute.googleapis.com",
+    "cloudtasks.googleapis.com", # drive-file-transfers queue (T27, cloudtasks.tf)
   ]
 }
 
@@ -464,4 +465,23 @@ variable "reference_refresh_cron" {
   description = "Cloud Scheduler cron for weekly reference data refresh. Default: Sunday 3 AM UTC."
   type        = string
   default     = "0 3 * * 0"
+}
+
+# ─── Cloud Tasks — drive-file-transfers queue (T27, cloudtasks.tf) ───────
+variable "transfer_queue_max_concurrent_dispatches" {
+  description = "Max simultaneously-running drive-file-transfers tasks (= concurrent Box connections from the transfer fan-out). Kept well under springboot_concurrency (40) x springboot_max_instances (10) = 400, and modest for Cloud NAT + Box API rate limits."
+  type        = number
+  default     = 30
+}
+
+variable "transfer_queue_max_dispatches_per_second" {
+  description = "Max dispatch rate for the drive-file-transfers queue. Bounds burst rate against Box + Cloud NAT, well under Cloud Tasks' unbounded default (~500/s)."
+  type        = number
+  default     = 20
+}
+
+variable "transfer_queue_max_attempts" {
+  description = "Max delivery attempts for a drive-file-transfers task before Cloud Tasks gives up. MUST be >= the app's app.transfer.max-attempts (default 5, AppRuntimeProperties.Transfer.maxAttempts) so the app's own retry/DLQ classification (T24) is always the terminator, never the queue."
+  type        = number
+  default     = 5
 }
