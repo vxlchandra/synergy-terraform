@@ -17,6 +17,11 @@ resource "google_cloud_tasks_queue" "drive_file_transfers" {
   location = var.region
   project  = var.project_id
 
+  # Ensure the Cloud Tasks API is enabled before the queue is created (avoids a
+  # transient first-apply "API not enabled" error). cloudtasks.googleapis.com is
+  # in var.enabled_apis (variables.tf).
+  depends_on = [google_project_service.required_apis["cloudtasks.googleapis.com"]]
+
   # Coherence: max_concurrent_dispatches bounds how many discover-folder /
   # process-file tasks run at once — each one holds a concurrent connection
   # to Box. This is kept well under Cloud Run's springboot_concurrency (40)
