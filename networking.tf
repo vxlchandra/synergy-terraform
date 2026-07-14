@@ -18,6 +18,9 @@ resource "google_compute_subnetwork" "springboot_subnet" {
   network       = google_compute_network.aeromontek_vpc.id
   ip_cidr_range = var.springboot_subnet_cidr
 
+  # PGA on: googleapis.com traffic (Firestore, Secret Manager, etc.) stays off
+  # Cloud NAT — only Box (and other non-Google egress) consumes NAT ports
+  # during the drive-file-transfers fan-out (T27).
   private_ip_google_access = true
 }
 
@@ -82,6 +85,18 @@ resource "google_compute_router_nat" "cloud_nat" {
   nat_ip_allocate_option              = "AUTO_ONLY"
   source_subnetwork_ip_ranges_to_nat  = "ALL_SUBNETWORKS_ALL_IP_RANGES"
   enable_endpoint_independent_mapping = false
+
+  # Dynamic port allocation — prevents NAT port exhaustion under bursty outbound
+  # (e.g. Box import/download jobs open many concurrent connections to api.box.com).
+  # Default (64 ports/VM, static) exhausted on 2026-07-13 → "SocketException: Network
+  # unreachable" on Box calls. DPA scales ports per-VM on demand. Requires
+  # enable_endpoint_independent_mapping = false (set above). Bounds are powers of two.
+  # min_ports_per_vm raised 64 -> 256 (T27): gives a cold instance more headroom
+  # before DPA has to ramp up, cutting first-burst latency/risk when the
+  # drive-file-transfers queue (cloudtasks.tf) fans out a batch of Box calls.
+  enable_dynamic_port_allocation = true
+  min_ports_per_vm               = 256
+  max_ports_per_vm               = 32768
 
   log_config {
     enable = true
