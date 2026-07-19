@@ -320,6 +320,74 @@ variable "classifier_chroma_snapshot_bucket" {
   default     = "" # Falls back to GCS_BUCKET if set; empty = no GCS persistence
 }
 
+# ─── Cloud Run — graphsvc (Apache AGE, P4) ───────────────────────────────
+# Authored, not applied. enable_graphsvc defaults false so no resources are
+# created until an operator opts in (see classifier/infra/GRAPHSVC_DEPLOY.md).
+variable "enable_graphsvc" {
+  description = "Create the Apache AGE graphsvc Cloud Run service + its SA/IAM. Default OFF (authored, not applied)."
+  type        = bool
+  default     = false
+}
+
+variable "graphsvc_service_name" {
+  description = "Cloud Run service name for the AGE graph service"
+  type        = string
+  default     = "aeromontek-graphsvc"
+}
+
+variable "graphsvc_image" {
+  description = "Docker image for graphsvc (combined Postgres+AGE + FastAPI). Built from classifier/infra/graphsvc.Dockerfile."
+  type        = string
+  default     = "us-docker.pkg.dev/zsynergy/zsynergy/aeromontek-graphsvc:latest"
+}
+
+variable "graphsvc_cpu" {
+  description = "CPU limit for graphsvc (Postgres+AGE + uvicorn in one container)"
+  type        = string
+  default     = "2"
+}
+
+variable "graphsvc_memory" {
+  description = "Memory limit in Gi for graphsvc"
+  type        = number
+  default     = 2
+}
+
+variable "graphsvc_concurrency" {
+  description = "Max concurrent requests per graphsvc instance (bounded pg8000 pool)"
+  type        = number
+  default     = 8
+}
+
+variable "graphsvc_min_instances" {
+  description = "Minimum instances for graphsvc (0 = scale-to-zero; graph rebuilds on cold start)"
+  type        = number
+  default     = 0
+}
+
+variable "graphsvc_max_instances" {
+  description = "Maximum instances for graphsvc"
+  type        = number
+  default     = 4
+}
+
+variable "graphsvc_graph_name" {
+  description = "AGE graph name (matches classifier config GRAPH_NAME / load_graph default)"
+  type        = string
+  default     = "aviation_records_kg"
+}
+
+variable "functions_runtime_sa" {
+  description = <<-EOT
+    Email of the Firebase Functions gen2 runtime service account that invokes
+    graphsvc over OIDC. Leave empty to fall back to the Compute Engine default
+    SA (<project-number>-compute@developer.gserviceaccount.com). Set this if the
+    functions codebase runs as a dedicated SA.
+  EOT
+  type        = string
+  default     = ""
+}
+
 # ─── CORS (Centralized — shared by Spring Boot API + Classifier) ────────
 variable "cors_allowed_origins" {
   description = "Comma-separated CORS origins. Passed to both Cloud Run services via env var."
