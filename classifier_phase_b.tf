@@ -87,7 +87,11 @@ resource "google_storage_bucket_iam_member" "classifier_models_reader" {
 #       env {
 #         name = "DATABASE_URL"
 #         value_source { secret_key_ref {
-#           secret  = "aeromon-classifier-database-url"   # create: postgresql://zsynergy:<pw>@/zsynergy?unix_sock=/cloudsql/<inst>/.s.PGSQL.5432
+#           secret  = "aeromon-classifier-database-url"   # create: postgresql://zsynergy:<pw-URLENCODED>@/zsynergy?unix_sock=/cloudsql/<inst>/.s.PGSQL.5432
+#           # <pw-URLENCODED>: PERCENT-ENCODE the whole password (incl. a literal % as %25):
+#           #   python -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$PW"
+#           # db.py unquotes it back before connecting (classifier PR #94); an unencoded
+#           # special char (@ : / %) here breaks auth or the URL parse.
 #           version = "latest"
 #         } }
 #       }
