@@ -77,12 +77,11 @@ resource "google_cloud_run_v2_service" "graphsvc" {
         container_port = 8080
       }
 
-      # Startup CPU boost shortens the cold-start graph rebuild (Postgres+AGE
-      # start + loader.load_graph). gen2 execution environment is implied by
-      # startup-cpu-boost; the deploy script sets it explicitly.
-      startup_cpu_boost = true
-
       resources {
+        # Startup CPU boost shortens the cold-start graph rebuild (Postgres+AGE
+        # start + loader.load_graph). In google provider v5+, startup_cpu_boost is
+        # a `resources` argument (not a container-level one).
+        startup_cpu_boost = true
         limits = {
           cpu    = var.graphsvc_cpu
           memory = "${var.graphsvc_memory}Gi"
