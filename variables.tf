@@ -538,15 +538,15 @@ variable "reference_refresh_cron" {
 
 # ─── Cloud Tasks — drive-file-transfers queue (T27, cloudtasks.tf) ───────
 variable "transfer_queue_max_concurrent_dispatches" {
-  description = "Max simultaneously-running drive-file-transfers tasks (= concurrent Box connections from the transfer fan-out). Kept well under springboot_concurrency (40) x springboot_max_instances (10) = 400, and modest for Cloud NAT + Box API rate limits."
+  description = "Max simultaneously-running drive-file-transfers tasks (= concurrent Box connections from the transfer fan-out). Kept well under springboot_concurrency (40) x springboot_max_instances (10) = 400, and modest for Cloud NAT + Box API rate limits. Matches the live prod queue (20) to keep terraform zero-diff."
   type        = number
-  default     = 30
+  default     = 20
 }
 
 variable "transfer_queue_max_dispatches_per_second" {
-  description = "Max dispatch rate for the drive-file-transfers queue. Bounds burst rate against Box + Cloud NAT, well under Cloud Tasks' unbounded default (~500/s)."
+  description = "Max dispatch rate for the drive-file-transfers queue. Bounds burst rate against Box + Cloud NAT, well under Cloud Tasks' unbounded default (~500/s). Matches the live prod queue (10) to keep terraform zero-diff."
   type        = number
-  default     = 20
+  default     = 10
 }
 
 variable "transfer_queue_max_attempts" {
