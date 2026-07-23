@@ -446,6 +446,7 @@ variable "alert_email_recipients" {
     "chandra@vxlllc.com",
     "synergy-admin-group@vxlllc.com",
     "synergy-ops-admin-group@vxlllc.com",
+    "sales-zsds@zsds.io", # kept: terraform-managed "AeroMontek alerts →" channel exists in prod
   ]
 }
 
