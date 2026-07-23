@@ -46,13 +46,24 @@ resource "google_storage_bucket_iam_member" "classifier_models_reader" {
 # Cloud SQL wiring for the classifier service (Phase B) — DOCUMENTED PATCH, not
 # applied here.
 #
-# WHY NOT A RESOURCE EDIT: `google_cloud_run_v2_service.classifier` in main.tf is
-# DRIFTED from prod (it does not define the 6 runtime secrets the live service has —
-# DB_PASSWORD/OPENAI/GEMINI/HF/INTERNAL_API_SECRET/FIREBASE_ADMIN_SA_PATH — because the
-# service is deployed imperatively via cloudbuild.yaml `gcloud run deploy`). Applying an
-# edited classifier resource would CLOBBER those secrets. Reconcile the resource with prod
-# FIRST (adopt the full env/secrets), THEN add the block below. Until then, the Cloud SQL
-# wiring is applied imperatively at flip time (see the Phase B runbook).
+# WHY NOT A RESOURCE EDIT: `google_cloud_run_v2_service.classifier` in main.tf and the live
+# prod service have a TWO-WAY drift (the classifier is deployed IMPERATIVELY via
+# cloudbuild.yaml `gcloud run deploy`, so terraform is not the deploy source of truth):
+#   * The TF resource is actually a FULLER config than prod runs — it ALREADY defines DB
+#     connectivity env (DB_HOST / DB_NAME / DB_USER / CLOUD_SQL_CONNECTION_NAME + the
+#     aeromon-db-password secret) plus PUSH_* / CORS_ORIGINS / CHROMA_SNAPSHOT_BUCKET /
+#     FLOW_CONTROL_MAX_MESSAGES / AUTO_CREATE_PUBSUB_RESOURCES that prod's current revision
+#     does NOT have. It has 5 of 6 runtime secrets (openai/gemini/hf/firebase-admin/db-password).
+#   * It is MISSING vs prod: INTERNAL_API_SECRET (NOT in var.secret_names — needs adding +
+#     an import) and GCP_REGION.
+# So `terraform apply` on this resource would ADD a lot of config to prod AND DROP
+# INTERNAL_API_SECRET (breaking functions↔classifier auth) + GCP_REGION. It is NOT apply-safe.
+# Reconcile with `terraform plan` against prod state (decide authoritative config; add
+# INTERNAL_API_SECRET to var.secret_names via import; confirm zero-diff) BEFORE any apply.
+# TF already INTENDS the Cloud SQL DB env — the gap is that it uses DB_HOST-style env, while
+# the hybrid engine reads DATABASE_URL (config._req). Reconcile that too. Until then the
+# classifier is imperatively managed; the flip wiring goes on via `gcloud run services update`
+# (see the Phase B runbook), and prod-classifier snapshot is scratchpad/prod-classifier-full.json.
 #
 # When reconciled, add to `google_cloud_run_v2_service.classifier` template:
 #
