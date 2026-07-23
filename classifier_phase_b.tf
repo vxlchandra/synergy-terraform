@@ -91,8 +91,19 @@ resource "google_storage_bucket_iam_member" "classifier_models_reader" {
 #           version = "latest"
 #         } }
 #       }
+#       # Graph-source mirror-write (classifier PR #93, flag-gated OFF in code).
+#       # When "true", pipeline.orchestrator.run_document best-effort upserts each
+#       # Layer-2 ExtractionRecord into the (tenant,project)-scoped `extractions`
+#       # table so graphsvc can rebuild a scope's derived AGE graph from Cloud SQL
+#       # (POST /graph/build {tenant,project}). SET ONLY once graphsvc is deployed
+#       # (enable_graphsvc=true) AND graph population is intended — it writes
+#       # customer-doc-derived structured data (msn/serials/fields) into Cloud SQL
+#       # (stays in-GCP, no AI provider). Omit the env entirely to keep it off.
+#       env { name = "GRAPH_SOURCE_WRITE" value = "true" }
 #     }
 #   }
 #
 # The classifier SA already has roles/cloudsql.client (google_project_iam_member.classifier_cloudsql).
 # db.py supports the unix_sock URL form (PR #92). CLASSIFIER_ENGINE stays unset until the flip.
+# GRAPH_SOURCE_WRITE stays unset until graphsvc is live and graph population is wanted; it can be
+# toggled imperatively at that point via `gcloud run services update ... --update-env-vars`.
