@@ -77,6 +77,17 @@ resource "google_cloud_run_v2_service" "graphsvc" {
         container_port = 8080
       }
 
+      # Cloud SQL connector socket mount. The SHARED instance is public-IP only
+      # (no private IP), so the graph source reader (graphsvc.app._source_conn_factory)
+      # connects over /cloudsql/<conn>/.s.PGSQL.5432, NOT DB_HOST. This mount makes
+      # that socket present. (Live service is imperatively managed —
+      # `gcloud run services update --add-cloudsql-instances` — because of
+      # lifecycle.ignore_changes below; this codifies it for recreation.)
+      volume_mounts {
+        name       = "cloudsql"
+        mount_path = "/cloudsql"
+      }
+
       resources {
         # Startup CPU boost shortens the cold-start graph rebuild (Postgres+AGE
         # start + loader.load_graph). In google provider v5+, startup_cpu_boost is
@@ -132,6 +143,16 @@ resource "google_cloud_run_v2_service" "graphsvc" {
       env {
         name  = "GRAPH_NAME"
         value = var.graphsvc_graph_name
+      }
+    }
+
+    # Attach the SHARED Cloud SQL instance so its connector socket is mounted at
+    # /cloudsql (see the container volume_mount above). Same instance the classifier
+    # uses; graphsvc only READS the source `extractions` rows.
+    volumes {
+      name = "cloudsql"
+      cloud_sql_instance {
+        instances = [google_sql_database_instance.postgres.connection_name]
       }
     }
 
