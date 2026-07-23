@@ -54,9 +54,9 @@ variable "cloud_sql_database" {
 }
 
 variable "cloud_sql_user" {
-  description = "Database user for Cloud SQL"
+  description = "Database user for Cloud SQL. Matches the actual prod user (the instance owner the apps connect as); NOT 'appuser' — that name never existed in prod and setting it forces a destructive google_sql_user replacement + password reset."
   type        = string
-  default     = "appuser"
+  default     = "zsynergy"
 }
 
 variable "cloud_sql_tier" {
