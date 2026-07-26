@@ -39,7 +39,21 @@ resource "google_cloud_run_v2_service_iam_member" "classifier_retrain_invoker" {
 }
 
 resource "google_cloud_scheduler_job" "classifier_retrain_head" {
-  count   = var.enable_classifier ? 1 : 0
+  # DISABLED (2026-07-25) — do not re-enable until an evaluation gate exists.
+  #
+  # /admin/retrain-head refits the live trained head straight from
+  # confirmed_exemplars and hot-reloads it with NO holdout evaluation, NO
+  # versioning, NO rollback, and NO drift detection. Nightly + unguarded means
+  # a bad confirmation batch silently degrades production classification with
+  # no way to reconstruct what the model looked like before — unacceptable
+  # for an aviation audit trail. This resource is intentionally left in place
+  # (not deleted) so the schedule can be restored with a one-line diff once a
+  # separate eval-gate for the retrain step ships (a separate agent is
+  # building it — see titan_classification_calibration_2026_07_22 /
+  # session_2026_07_25_trial_restrictions memory notes for the surrounding
+  # accuracy-gate work). The endpoint itself is untouched — this only stops
+  # Cloud Scheduler from calling it automatically.
+  count   = 0 # was: var.enable_classifier ? 1 : 0 — restore that line to re-enable.
   project = var.project_id
   region  = var.region
   name    = "classifier-retrain-head-nightly"

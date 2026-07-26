@@ -25,6 +25,36 @@
 #
 # The WAF policy itself lives in cloudarmor.tf; it is attached below via the
 # backend service's security_policy.
+#
+# ─── Why this is deferred ────────────────────────────────────────────────
+# Decision (2026-07-25): keep this OFF (var.enable_api_lb default false)
+# until there are paying customers. Cloud Run's existing INGRESS_TRAFFIC_ALL
+# path is already TLS-terminated and authenticated at the app layer; a WAF
+# in front of it buys defense-in-depth (OWASP CRS rules + per-IP rate
+# limiting in cloudarmor.tf) that isn't worth the added cost/complexity pre-
+# revenue. Flip enable_api_lb=true (+ set api_lb_domain) once that changes.
+#
+# ─── Rough cost (INFERRED from public GCP list pricing, not billing-
+#      verified — re-check current Cloud Billing rates before enabling) ──
+#   - Global external Application Load Balancer: ~$18-25/mo baseline
+#     (forwarding rule + LB capacity charge), plus data-processing charges
+#     that scale with traffic (near-zero at current volume).
+#   - Cloud Armor standard-tier WAF policy (cloudarmor.tf): ~$5/mo for the
+#     policy + 5 rules (per that file's own estimate), plus per-request
+#     evaluation charges at higher volume.
+#   - Google-managed SSL cert: free.
+#   Combined baseline: roughly $25-30/mo before traffic-based charges.
+#
+# ─── What must be enabled together ───────────────────────────────────────
+# All resources in this file share a single count gate (local.api_lb_enabled
+# = var.enable_api_lb && var.enable_springboot), so flipping enable_api_lb
+# turns ALL of them on atomically in one `terraform apply` — reserved IP,
+# serverless NEG, backend service (+ Cloud Armor attached via
+# security_policy), URL map, managed SSL cert, HTTPS proxy, and forwarding
+# rule. There is no partial-apply state: either none of these exist, or all
+# of them do. The two-step DNS + ingress CUTOVER above remains manual and
+# out-of-band by design, even after enabling this file's resources — so
+# enabling this file alone cannot break the existing App Hosting path.
 # =============================================================================
 
 locals {
