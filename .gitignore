@@ -44,3 +44,6 @@ terraform.tfvars.backup
 # OS files
 .DS_Store
 Thumbs.db
+
+# Terraform plan artefacts (graphsvc.plan etc) — outputs, not source
+*.plan

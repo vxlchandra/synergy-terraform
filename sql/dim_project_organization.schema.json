@@ -1,0 +1,32 @@
+[
+  {
+    "name": "projectId",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Firestore project id. Matches model_invocations_v1.projectId."
+  },
+  {
+    "name": "organizationId",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "Owning organization. Source: Firestore projects/{id}.organizationId."
+  },
+  {
+    "name": "organizationName",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Display name, for reporting only. Never a join key."
+  },
+  {
+    "name": "source",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "How the mapping was derived: 'project_field' (projects/{id}.organizationId) or 'owner_membership' (resolved through createdBy's org, for the legacy backlog that predates the field). Kept so a backfilled row is never mistaken for an authoritative one."
+  },
+  {
+    "name": "updatedAt",
+    "type": "TIMESTAMP",
+    "mode": "NULLABLE",
+    "description": "Last time this mapping was written."
+  }
+]
