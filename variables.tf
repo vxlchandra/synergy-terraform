@@ -388,6 +388,69 @@ variable "functions_runtime_sa" {
   default     = ""
 }
 
+# ─── Cloud Run — rastersvc (page rasterization, Spec E) ──────────────────
+# Authored, not applied. enable_rastersvc defaults false so nothing is created
+# until an operator opts in (see terraform/rastersvc.tf).
+variable "enable_rastersvc" {
+  description = "Create the rastersvc Cloud Run service + its SA/IAM. Default OFF (authored, not applied)."
+  type        = bool
+  default     = false
+}
+
+variable "rastersvc_service_name" {
+  description = "Cloud Run service name for the page rasterization service"
+  type        = string
+  default     = "aeromontek-rastersvc"
+}
+
+variable "rastersvc_image" {
+  description = "Docker image for rastersvc. Built from classifier/Dockerfile.rastersvc."
+  type        = string
+  default     = "us-docker.pkg.dev/zsynergy/zsynergy/aeromontek-rastersvc:latest"
+}
+
+variable "rastersvc_cpu" {
+  description = "CPU limit for rastersvc. Rendering is CPU-bound; this is the knob that moves render latency."
+  type        = string
+  default     = "2"
+}
+
+variable "rastersvc_memory" {
+  description = "Memory limit in Gi. PyMuPDF holds one page bitmap at a time (150 DPI, max edge 2000px), not the document."
+  type        = number
+  default     = 2
+}
+
+variable "rastersvc_concurrency" {
+  description = "Max concurrent requests per instance. Low on purpose: one uvicorn worker, CPU-bound work, so extra requests contend for the same cores."
+  type        = number
+  default     = 4
+}
+
+variable "rastersvc_min_instances" {
+  description = "Minimum instances (0 = scale-to-zero). Rendering is lazy and the feature is not yet enabled; a warm instance would bill for something nothing calls. Raise to 1 when the viewer ships and a cold start lands on a user."
+  type        = number
+  default     = 0
+}
+
+variable "rastersvc_max_instances" {
+  description = "Maximum instances for rastersvc"
+  type        = number
+  default     = 10
+}
+
+variable "rastersvc_sync_pages" {
+  description = "Pages rendered before /render responds; the rest continue in a background task. Must match RASTER_SYNC_PAGES in rastersvc/app.py."
+  type        = number
+  default     = 3
+}
+
+variable "rastersvc_max_pages" {
+  description = "Hard ceiling on pages rendered per document. A bound against one pathological upload occupying an instance, not a tuning knob."
+  type        = number
+  default     = 500
+}
+
 # ─── CORS (Centralized — shared by Spring Boot API + Classifier) ────────
 variable "cors_allowed_origins" {
   description = "Comma-separated CORS origins. Passed to both Cloud Run services via env var."

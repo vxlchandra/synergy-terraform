@@ -65,6 +65,19 @@ resource "google_cloud_run_v2_service" "graphsvc" {
   # as the classifier service (deploy owns image/env/scaling at runtime).
   lifecycle {
     ignore_changes = all
+
+    # DO NOT REMOVE. This service IS DEPLOYED AND LIVE, but `enable_graphsvc`
+    # still defaults to false and terraform.tfvars is gitignored. A plan from a
+    # clean checkout on 2026-07-31 therefore proposed:
+    #   google_cloud_run_v2_service.graphsvc[0] will be destroyed
+    #   (because index [0] is out of range for count)
+    # along with its service account, both project IAM bindings, the secret
+    # accessor binding and all three invoker bindings. Nothing in the repo
+    # prevented that apply — only the absence of anyone running it.
+    # prevent_destroy makes the deletion a hard error instead of a silent plan
+    # line. The real fix is a checked-in var file (see terraform/CLAUDE.md);
+    # this is the backstop that holds until then.
+    prevent_destroy = true
   }
 
   template {
