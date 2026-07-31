@@ -321,12 +321,25 @@ variable "classifier_chroma_snapshot_bucket" {
 }
 
 # ─── Cloud Run — graphsvc (Apache AGE, P4) ───────────────────────────────
-# Authored, not applied. enable_graphsvc defaults false so no resources are
-# created until an operator opts in (see classifier/infra/GRAPHSVC_DEPLOY.md).
+# APPLIED AND LIVE since 2026-07-23. This block used to read "authored, not
+# applied" with default = false, and that stayed false after the apply.
+#
+# The result, found 2026-07-31: terraform.tfvars is gitignored (.gitignore:33),
+# so a clean checkout evaluated enable_graphsvc = false, planned count = 0 for a
+# service that exists, and proposed destroying the live graphsvc Cloud Run
+# service, its service account, both project IAM bindings, the secret accessor
+# binding and all three invoker bindings. Eight deletions, no warning louder
+# than a plan line.
+#
+# The lesson is general: a default-OFF flag is honest only while the resource is
+# genuinely unapplied. Once applied, the default must be flipped to true in the
+# same change, or the flag silently becomes a delete instruction for anyone
+# without the untracked tfvars. Verified against `terraform state list` before
+# flipping — 8 graphsvc resources present.
 variable "enable_graphsvc" {
-  description = "Create the Apache AGE graphsvc Cloud Run service + its SA/IAM. Default OFF (authored, not applied)."
+  description = "Create the Apache AGE graphsvc Cloud Run service + its SA/IAM. TRUE because it is deployed and live — see the note above before changing."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "graphsvc_service_name" {
@@ -391,8 +404,13 @@ variable "functions_runtime_sa" {
 # ─── Cloud Run — rastersvc (page rasterization, Spec E) ──────────────────
 # Authored, not applied. enable_rastersvc defaults false so nothing is created
 # until an operator opts in (see terraform/rastersvc.tf).
+#
+# WHEN YOU APPLY THIS, FLIP THE DEFAULT TO TRUE IN THE SAME CHANGE. Leaving it
+# false after the resources exist is what turned enable_graphsvc into a pending
+# eight-resource deletion (see the note on that variable). Verified false today:
+# `terraform state list` contains no rastersvc resources.
 variable "enable_rastersvc" {
-  description = "Create the rastersvc Cloud Run service + its SA/IAM. Default OFF (authored, not applied)."
+  description = "Create the rastersvc Cloud Run service + its SA/IAM. Default OFF — genuinely not applied yet. Flip to true in the same change that applies it."
   type        = bool
   default     = false
 }
