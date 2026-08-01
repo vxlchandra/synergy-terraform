@@ -405,14 +405,14 @@ variable "functions_runtime_sa" {
 # Authored, not applied. enable_rastersvc defaults false so nothing is created
 # until an operator opts in (see terraform/rastersvc.tf).
 #
-# WHEN YOU APPLY THIS, FLIP THE DEFAULT TO TRUE IN THE SAME CHANGE. Leaving it
-# false after the resources exist is what turned enable_graphsvc into a pending
-# eight-resource deletion (see the note on that variable). Verified false today:
-# `terraform state list` contains no rastersvc resources.
+# APPLIED 2026-07-31, and the default was flipped to true IN THE SAME CHANGE —
+# which is precisely the step that was missed for graphsvc and left a live
+# service one clean-checkout apply away from deletion. See the note on
+# enable_graphsvc for what that costs.
 variable "enable_rastersvc" {
-  description = "Create the rastersvc Cloud Run service + its SA/IAM. Default OFF — genuinely not applied yet. Flip to true in the same change that applies it."
+  description = "Create the rastersvc Cloud Run service + its SA/IAM. TRUE because it is applied — see the note on enable_graphsvc before changing."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "rastersvc_service_name" {
@@ -490,13 +490,19 @@ variable "enabled_apis" {
     "secretmanager.googleapis.com",
     "iam.googleapis.com",
     "cloudresourcemanager.googleapis.com",
-    "apphosting.googleapis.com",
+    # NOT "apphosting.googleapis.com" — that service does not exist. The real name
+    # is firebaseapphosting, and it is already ENABLED, so this line is a state
+    # adoption, not a change. The wrong name has been in this list since the initial
+    # commit and has never been adopted: every apply failed on it and left the other
+    # 19 APIs enabled, which is why nobody noticed.
+    "firebaseapphosting.googleapis.com",
     "firebase.googleapis.com",
     "firestore.googleapis.com",
     "cloudkms.googleapis.com",
     "logging.googleapis.com",
     "monitoring.googleapis.com",
-    "errorreporting.googleapis.com",
+    # Same: the real name is clouderrorreporting.googleapis.com.
+    "clouderrorreporting.googleapis.com",
     "cloudtrace.googleapis.com",
     "sqladmin.googleapis.com",
     "servicenetworking.googleapis.com",
