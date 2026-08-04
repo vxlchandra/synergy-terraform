@@ -185,15 +185,28 @@ variable "enable_cloudbuild_trigger" {
 
 # ─── API Load Balancer + Cloud Armor (staged, see api-loadbalancer.tf) ───────
 variable "enable_api_lb" {
-  description = "Provision the Global External ALB in front of the Spring Boot API with the Cloud Armor WAF attached. Default false: the LB resources are NOT created. Enabling is additive (does not disturb the existing App Hosting path); the DNS + ingress cutover remains a manual step. See api-loadbalancer.tf."
+  description = <<-EOT
+  Provision the Global External ALB in front of the Spring Boot API with the
+  Cloud Armor WAF attached. See api-loadbalancer.tf.
+
+  DEFAULT FLIPPED false -> true ON 2026-08-02, in the same change that made it
+  true in reality. The LB was APPLIED on that date (global IP 8.232.66.240,
+  backend `aeromontek-api-backend` with policy `aeromontek-api-waf` attached).
+
+  Leaving the default at false after applying is the documented `enable_*` trap:
+  terraform.tfvars is gitignored, so a clean checkout would plan count = 0 for
+  resources that exist and DESTROY them. For this stack that means releasing the
+  global IP -- and a released global IP does not come back. Verify against
+  `terraform state list` before ever flipping this to false.
+  EOT
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "api_lb_domain" {
-  description = "FQDN for the API load balancer's Google-managed SSL certificate (e.g. api.zsds.io). Required (non-empty) when enable_api_lb = true."
+  description = "FQDN for the API load balancer's Google-managed SSL certificate. Required (non-empty) when enable_api_lb = true. Certificate stays PROVISIONING until this name resolves to the LB IP."
   type        = string
-  default     = ""
+  default     = "api.zsds.io"
 }
 
 # ─── Service Accounts ────────────────────────────────────────────────────

@@ -29,8 +29,33 @@ variable "classifier_internal_secret" {
 }
 
 # The scheduler's OIDC identity (classifier SA) must be allowed to invoke the classifier.
+variable "enable_classifier_retrain" {
+  description = <<-EOT
+  Create the nightly trained-head retrain scheduler.
+
+  DEFAULT FALSE, DELIBERATELY. This is NOT the same decision as deploying the
+  classifier, and it must not ride on `enable_classifier` (which is true and must
+  stay true -- flipping that destroys the classifier Cloud Run service itself).
+
+  As authored, the job POSTs an EMPTY body, which the endpoint interprets as
+  "all tenants": every tenant's confirmed exemplars are pooled into ONE trained
+  head, which is then hot-reloaded into the live engine. The validation gate and
+  artifact versioning both default OFF and are set nowhere in this repo, and
+  there is no rollback path.
+
+  Do not enable until, at minimum:
+    1. the request body scopes to a single tenant, or the endpoint refuses an
+       unscoped retrain;
+    2. the validation gate is ON and checks ITEM accuracy, not only section;
+    3. artifact versioning is ON so a bad head can be rolled back;
+    4. promotion is validated against a held-out set before hot-reload.
+  EOT
+  type        = bool
+  default     = false
+}
+
 resource "google_cloud_run_v2_service_iam_member" "classifier_retrain_invoker" {
-  count    = var.enable_classifier ? 1 : 0
+  count    = var.enable_classifier && var.enable_classifier_retrain ? 1 : 0
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.classifier[0].name
@@ -39,7 +64,7 @@ resource "google_cloud_run_v2_service_iam_member" "classifier_retrain_invoker" {
 }
 
 resource "google_cloud_scheduler_job" "classifier_retrain_head" {
-  count   = var.enable_classifier ? 1 : 0
+  count   = var.enable_classifier && var.enable_classifier_retrain ? 1 : 0
   project = var.project_id
   region  = var.region
   name    = "classifier-retrain-head-nightly"
