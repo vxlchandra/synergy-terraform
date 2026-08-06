@@ -482,6 +482,60 @@ variable "rastersvc_max_pages" {
   default     = 500
 }
 
+variable "enable_officesvc" {
+  description = "Create the officesvc Cloud Run service + its SA/IAM. FALSE because it is authored but NOT YET APPLIED — flip to true in the SAME change that applies it, or a clean checkout plans to destroy it (see the note in officesvc.tf)."
+  type        = bool
+  default     = false
+}
+
+variable "officesvc_service_name" {
+  description = "Cloud Run service name for the document conversion service"
+  type        = string
+  default     = "aeromontek-officesvc"
+}
+
+variable "officesvc_image" {
+  description = "Docker image for officesvc. Built from classifier/Dockerfile.officesvc."
+  type        = string
+  default     = "us-docker.pkg.dev/zsynergy/zsynergy/aeromontek-officesvc:latest"
+}
+
+variable "officesvc_cpu" {
+  description = "CPU limit for officesvc. LibreOffice conversion is CPU-bound; this is the knob that moves conversion latency."
+  type        = string
+  default     = "2"
+}
+
+variable "officesvc_memory" {
+  description = "Memory limit in Gi. Higher than rastersvc on purpose: LibreOffice holds the WHOLE document model in memory, not one page — a large deck or spreadsheet is the peak, and a real 348-page corpus spreadsheet is what set this."
+  type        = number
+  default     = 4
+}
+
+variable "officesvc_concurrency" {
+  description = "Max concurrent requests per instance. ONE: a conversion is a CPU-bound soffice subprocess and two on an instance contend for the same cores."
+  type        = number
+  default     = 1
+}
+
+variable "officesvc_min_instances" {
+  description = "Minimum instances (0 = scale-to-zero). LibreOffice's first start is slow, so 0 means the first Office document a user opens waits on a cold suite. Raise to 1 if that latency is felt."
+  type        = number
+  default     = 0
+}
+
+variable "officesvc_max_instances" {
+  description = "Maximum instances for officesvc"
+  type        = number
+  default     = 5
+}
+
+variable "officesvc_convert_timeout" {
+  description = "Seconds before one conversion is abandoned. LibreOffice can hang on a malformed document and would otherwise hold the single worker indefinitely. Must match OFFICE_CONVERT_TIMEOUT in officesvc/convert.py."
+  type        = number
+  default     = 180
+}
+
 # ─── CORS (Centralized — shared by Spring Boot API + Classifier) ────────
 variable "cors_allowed_origins" {
   description = "Comma-separated CORS origins. Passed to both Cloud Run services via env var."
