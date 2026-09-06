@@ -255,8 +255,11 @@ resource "google_project_iam_member" "springboot_firestore" {
 # (ProjectCollaboratorService, ships 2026-09-06) and the membership reconciler's
 # firebaseAuth.getUser() calls (blind since 2026-08-05 for the exact same missing
 # permission -- see docs/platform/GAP_ANALYSIS_2026-09-05.md). Granted directly via
-# gcloud on 2026-09-06 to unblock production immediately; this resource exists so the
-# next `terraform apply` reflects reality instead of silently reverting it.
+# gcloud on 2026-09-06 to unblock production immediately; this resource records that
+# emergency grant declaratively so it's reproducible in other environments (dev,
+# staging, DR) rather than living only as an undocumented manual change -- an
+# additive google_project_iam_member left out of Terraform isn't reverted by drift,
+# it's just invisible to anyone rebuilding the project from this config.
 resource "google_project_iam_member" "springboot_firebaseauth_viewer" {
   count   = var.enable_springboot ? 1 : 0
   project = var.project_id
