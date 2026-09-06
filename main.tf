@@ -250,6 +250,20 @@ resource "google_project_iam_member" "springboot_firestore" {
   member  = "serviceAccount:${google_service_account.springboot[0].email}"
 }
 
+# Read-only Firebase Auth access (firebaseauth.users.get) -- needed by any server-side
+# Admin SDK/Identity Toolkit user lookup: MfaEnrollmentLookup's accounts:lookup call
+# (ProjectCollaboratorService, ships 2026-09-06) and the membership reconciler's
+# firebaseAuth.getUser() calls (blind since 2026-08-05 for the exact same missing
+# permission -- see docs/platform/GAP_ANALYSIS_2026-09-05.md). Granted directly via
+# gcloud on 2026-09-06 to unblock production immediately; this resource exists so the
+# next `terraform apply` reflects reality instead of silently reverting it.
+resource "google_project_iam_member" "springboot_firebaseauth_viewer" {
+  count   = var.enable_springboot ? 1 : 0
+  project = var.project_id
+  role    = "roles/firebaseauth.viewer"
+  member  = "serviceAccount:${google_service_account.springboot[0].email}"
+}
+
 # Classifier SA roles
 resource "google_project_iam_member" "classifier_cloudsql" {
   count   = var.enable_classifier ? 1 : 0
