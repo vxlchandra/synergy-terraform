@@ -788,6 +788,14 @@ resource "google_pubsub_topic" "topics" {
 }
 
 # Pub/Sub Subscriptions
+# NOTE (2026-09-06): this subscription did NOT exist in production despite being
+# declared here with enable_classifier defaulting to true — terraform state had
+# drifted. It was created by hand after granting the classifier
+# roles/iam.serviceAccountUser on its own SA; without that the app's startup
+# 403'd on iam.serviceAccounts.actAs on EVERY boot and logged it as "non-fatal",
+# so a whole feature (the Camel chunk scatter/gather) was unreachable and looked
+# like log noise. Verify against live state before trusting a plan here, and see
+# docs/platform/INCIDENT_2026_09_06_CLASSIFICATION_STALL.md.
 resource "google_pubsub_subscription" "classifier_request_sub" {
   count   = var.enable_classifier ? 1 : 0
   project = var.project_id

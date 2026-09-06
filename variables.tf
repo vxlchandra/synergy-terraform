@@ -408,6 +408,13 @@ variable "pubsub_topics" {
     "invoice-events",
     "email-outbox",
     "email-outbox-dlq",
+    # Wake path. Created out-of-band by the classifier's startup
+    # (AUTO_CREATE_PUBSUB_RESOURCES) and by hand on 2026-09-06; declared here so
+    # a future apply does not treat them as unmanaged. The -dlq was ADDED on
+    # 2026-09-06 — before that the subscription carrying ALL customer ingestion
+    # had no dead-letter policy at all.
+    "classification-wake",
+    "classification-wake-dlq",
   ]
 }
 
