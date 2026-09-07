@@ -842,8 +842,9 @@ resource "google_pubsub_subscription" "classifier_request_sub" {
 # via CLAIM_IN_PROGRESS) but it burned an extra instance slot each time.
 #
 # IMPORT BEFORE APPLY — this resource already exists:
-#   terraform import google_pubsub_subscription.classification_wake_push \
+#   terraform import 'google_pubsub_subscription.classification_wake_push[0]' \
 #     projects/zsynergy/subscriptions/classification-wake-push
+# The [0] is required — this resource has `count`. Without it the import fails.
 # Without the import, apply fails with ALREADY_EXISTS.
 resource "google_pubsub_subscription" "classification_wake_push" {
   count   = var.enable_classifier ? 1 : 0
@@ -854,20 +855,34 @@ resource "google_pubsub_subscription" "classification_wake_push" {
   ack_deadline_seconds       = 600
   message_retention_duration = "604800s" # 7 days
 
-  dynamic "push_config" {
-    for_each = var.classifier_push_endpoint_url != "" ? [1] : []
-    content {
-      push_endpoint = "${var.classifier_push_endpoint_url}/pubsub/wake"
-      oidc_token {
-        service_account_email = google_service_account.classifier[0].email
-        audience              = var.classifier_push_endpoint_url
-      }
-    }
-  }
-
   dead_letter_policy {
     dead_letter_topic     = google_pubsub_topic.topics["classification-wake-dlq"].id
     max_delivery_attempts = 5
+  }
+
+  # push_config is DELIBERATELY NOT DECLARED, and deliberately ignored.
+  #
+  # The first version of this resource rendered push_config from a `dynamic`
+  # block gated on `var.classifier_push_endpoint_url != ""`. That variable is set
+  # NOWHERE — not in vars/zsynergy.tfvars, not in any script, not via TF_VAR_ —
+  # so it defaults to "" and the block rendered ZERO times. `terraform import`
+  # followed by `apply` would then have issued modifyPushConfig with an empty
+  # endpoint, converting this subscription to PULL. Nothing pulls
+  # classification-wake, so every wake would have gone nowhere and the entire
+  # classification pipeline would have stalled with no error raised anywhere.
+  # That is the exact silent-strand this resource was added to prevent.
+  #
+  # Reusing the request subscription's variable is not an option either: the two
+  # push configs genuinely differ, confirmed against live —
+  #   request: endpoint .../pubsub/push   audience .../pubsub/push
+  #   wake:    endpoint .../pubsub/wake   audience <bare origin>
+  # so no single value of classifier_push_endpoint_url is correct for both.
+  #
+  # Terraform therefore manages the attributes it can compute correctly (ack
+  # deadline, DLQ, retention) and never touches the push config. The push config
+  # is set at deploy time, where the service URL is actually known.
+  lifecycle {
+    ignore_changes = [push_config]
   }
 
   depends_on = [google_pubsub_topic.topics]
