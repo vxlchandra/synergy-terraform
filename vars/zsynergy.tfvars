@@ -80,3 +80,14 @@ alert_email_recipients = ["sales-zsds@zsds.io", "chandra@vxlllc.com"]
 github_owner  = "zsds"
 github_repo   = "gcp-builds"
 github_branch = "main"
+
+# ── Global External ALB + Cloud Armor WAF in front of the Spring Boot API ────
+# MUST stay true. These seven resources are LIVE (aeromontek-api-urlmap,
+# aeromon-edge-policy, aeromontek-api-waf) and are in state as api_lb[0].
+# `enable_api_lb` defaults to FALSE in variables.tf, so omitting it here makes
+# every one of them plan as count = 0 — i.e. a routine `terraform apply`, which
+# deploy_gcp.sh runs, DESTROYS the production load balancer and the WAF.
+# Verified 2026-09-08: state holds google_compute_{url_map,backend_service,
+# target_https_proxy,global_forwarding_rule,managed_ssl_certificate,
+# global_address}.api_lb[0] plus google_compute_security_policy.api_waf.
+enable_api_lb = true
