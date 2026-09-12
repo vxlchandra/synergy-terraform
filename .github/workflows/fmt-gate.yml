@@ -1,0 +1,59 @@
+# MIT License — Copyright (c) 2026 Z-Score Data Systems LLC
+#
+# Canonical formatting for the infrastructure definition.
+#
+# This repository had NO workflows at all — nothing ran on a pull request, and
+# nothing ran on a push. Every other repo in the platform has at least one gate.
+#
+# Formatting is the deliberately small first one. `terraform fmt` is offline,
+# deterministic, needs no provider download, no credentials and no backend, so
+# it cannot flake and cannot cost anything. It also matters more here than in an
+# application repo: this is the file set a human reads when deciding whether a
+# plan is safe to apply, and inconsistent alignment is exactly the noise that
+# hides a one-line change to a production value.
+#
+# `terraform validate` is deliberately NOT gated yet. It needs `terraform init`
+# to resolve providers, and on the version pinned here that currently fails
+# locally with a provider constraint conflict — so a validate gate would be red
+# or flaky on day one, which is how gates get disabled. Adding it is worth doing
+# once the provider constraints resolve cleanly; see the PR that introduced this
+# file for the specific error observed.
+#
+# Verified before this workflow was added: one tracked file (vars/zsynergy.tfvars)
+# failed `fmt -check` and is reformatted in the same change, so this gate starts
+# green rather than importing existing debt.
+name: fmt-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fmt-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          # Pinned rather than "latest": `fmt` output has changed between minor
+          # versions before, and a gate that reformats differently from the
+          # developer's CLI is worse than no gate.
+          terraform_version: 1.15.6
+          terraform_wrapper: false
+
+      # -recursive so nested module and vars directories are covered too.
+      # -diff so a failure shows WHAT is misformatted in the log, rather than
+      # only naming the file and leaving the reader to run it locally.
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff .

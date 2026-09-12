@@ -13,7 +13,7 @@ repo_name     = "zsynergy"
 
 # Firestore (default) DB lives in the nam5 multi-region — IMMUTABLE, do not change.
 firestore_location = "nam5"
-sa_prefix     = "zsds-sa"
+sa_prefix          = "zsds-sa"
 
 # ─── VPC & Networking ──────────────────────────────────────────────────────
 vpc_name                = "aeromontek-vpc"
