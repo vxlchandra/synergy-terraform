@@ -39,12 +39,37 @@ resource "google_service_account" "rastersvc" {
 # a crafted object path asks it to do. Rendered pages are expired by a bucket
 # lifecycle rule, not by this service.
 #
-# Scoped to the two buckets that actually hold customer documents (documents,
-# uploads) — NOT `google_project_iam_member`, which the classifier's own grant
-# uses but which also covers the classifier's model-artifact bucket and any
-# future project buckets. This is a strict subset of what rastersvc already
-# had (every bucket in the project), so it cannot remove access this LIVE
-# service depends on today.
+# Scoped to the buckets that actually hold customer documents — NOT
+# `google_project_iam_member`, which the classifier's own grant uses but
+# which also covers the classifier's model-artifact bucket and any future
+# project buckets.
+#
+# THREE buckets, not two: this file originally scoped only to the
+# Terraform-managed `documents`/`uploads` buckets (storage.tf). Caught on
+# review before merge — the Spring Boot API (which invokes rastersvc,
+# RasterService.java) is deployed with GCS_BUCKET hardcoded to
+# `<project>.firebasestorage.app` (cloudbuild.yaml:399, every deploy script),
+# the Firebase Storage default bucket. That bucket predates this Terraform
+# root and has no `google_storage_bucket` resource here to reference, so the
+# grant below targets it by literal name. Keeping the documents/uploads
+# grants too rather than dropping them: nothing here confirms they're
+# actually dead, and keeping is strictly safer than a guess that removes
+# access. This IS still a strict subset of the project-wide grant it
+# replaces, so it cannot remove access this LIVE service depends on today.
+resource "google_storage_bucket_iam_member" "rastersvc_firebase_default_viewer" {
+  count  = var.enable_rastersvc ? 1 : 0
+  bucket = "${var.project_id}.firebasestorage.app"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.rastersvc[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "rastersvc_firebase_default_creator" {
+  count  = var.enable_rastersvc ? 1 : 0
+  bucket = "${var.project_id}.firebasestorage.app"
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.rastersvc[0].email}"
+}
+
 resource "google_storage_bucket_iam_member" "rastersvc_documents_viewer" {
   count  = var.enable_rastersvc ? 1 : 0
   bucket = google_storage_bucket.documents.name
@@ -93,13 +118,15 @@ resource "google_cloud_run_v2_service" "rastersvc" {
   lifecycle {
     ignore_changes = all
 
-    # DO NOT REMOVE. `enable_rastersvc` defaults to false, and terraform.tfvars
-    # is gitignored — so a checkout without it plans `count = 0` and silently
-    # DESTROYS this service. That is not hypothetical: on 2026-07-31 a plan from
-    # a clean checkout proposed destroying the LIVE graphsvc service and its SA
-    # for exactly this reason. prevent_destroy converts that silent deletion into
-    # a hard error. Tearing rastersvc down deliberately means editing this block
-    # first — which is the point.
+    # DO NOT REMOVE. `enable_rastersvc` now defaults to TRUE (this service is
+    # LIVE), but terraform.tfvars is still gitignored — so a checkout without
+    # it, before that default was corrected, would have planned `count = 0`
+    # and silently DESTROYED this service. That is not hypothetical: on
+    # 2026-07-31 a plan from a clean checkout proposed destroying the LIVE
+    # graphsvc service and its SA for exactly this reason. prevent_destroy
+    # converts that silent deletion into a hard error regardless of what the
+    # default is set to. Tearing rastersvc down deliberately means editing
+    # this block first — which is the point.
     prevent_destroy = true
   }
 

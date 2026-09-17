@@ -37,9 +37,26 @@ resource "google_service_account" "officesvc" {
 # that cannot delete cannot destroy a customer's source document, whatever a
 # bug or a crafted object path asks it to do.
 #
-# Scoped to the two buckets that actually hold customer documents (documents,
-# uploads) — see rastersvc.tf's identical fix for why this replaces
-# `google_project_iam_member`.
+# Scoped to the buckets that actually hold customer documents — see
+# rastersvc.tf's identical fix (and its comment) for why this includes the
+# Firebase Storage default bucket alongside documents/uploads, and why it
+# replaces `google_project_iam_member`. officesvc defaults off today, so
+# this has no live effect yet, but should match rastersvc's scope for when
+# it's enabled.
+resource "google_storage_bucket_iam_member" "officesvc_firebase_default_viewer" {
+  count  = var.enable_officesvc ? 1 : 0
+  bucket = "${var.project_id}.firebasestorage.app"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.officesvc[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "officesvc_firebase_default_creator" {
+  count  = var.enable_officesvc ? 1 : 0
+  bucket = "${var.project_id}.firebasestorage.app"
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.officesvc[0].email}"
+}
+
 resource "google_storage_bucket_iam_member" "officesvc_documents_viewer" {
   count  = var.enable_officesvc ? 1 : 0
   bucket = google_storage_bucket.documents.name

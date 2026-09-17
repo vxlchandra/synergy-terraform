@@ -415,8 +415,7 @@ variable "functions_runtime_sa" {
 }
 
 # ─── Cloud Run — rastersvc (page rasterization, Spec E) ──────────────────
-# Authored, not applied. enable_rastersvc defaults false so nothing is created
-# until an operator opts in (see terraform/rastersvc.tf).
+# LIVE. See terraform/rastersvc.tf.
 #
 # APPLIED 2026-07-31, and the default was flipped to true IN THE SAME CHANGE —
 # which is precisely the step that was missed for graphsvc and left a live

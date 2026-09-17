@@ -1032,5 +1032,8 @@ resource "google_cloud_scheduler_job" "reference_refresh" {
     }
   }
 
-  depends_on = [google_cloud_run_v2_service.springboot]
+  depends_on = [
+    google_cloud_run_v2_service.springboot,
+    google_project_service.required_apis["cloudscheduler.googleapis.com"],
+  ]
 }
