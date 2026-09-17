@@ -393,6 +393,28 @@ variable "alert_dlq_window_seconds" {
   default     = 300
 }
 
+# ─── SYN-1802: ingestion-delivery canary + passive divergence monitor ───
+# The 2026-08-22 to 09-01 incident had onIngestionActivated silently stop
+# firing for 9 days, producing ZERO application-level error logs — every
+# other alert here is error-rate-based, so this trap needed its own signal.
+variable "alert_ingestion_canary_absence_window_seconds" {
+  description = "How long the ingestion canary's ack metric may be silent before paging — sized to the canary's own 15-minute interval plus a grace period."
+  type        = number
+  default     = 1500 # 25 minutes
+}
+
+variable "alert_ingestion_divergence_window_seconds" {
+  description = "Rolling window the passive divergence monitor compares active_ingestions write volume against onIngestionActivated invocation volume over."
+  type        = number
+  default     = 1800 # 30 minutes
+}
+
+variable "alert_ingestion_divergence_ratio_threshold" {
+  description = "Fraction of writes lacking a matching invocation, sustained for the window above, that triggers the divergence alert. 0.5 means writes outpacing invocations by 2x."
+  type        = number
+  default     = 0.5
+}
+
 # ─── Pub/Sub ─────────────────────────────────────────────────────────────
 variable "pubsub_topics" {
   description = "Pub/Sub topics to create"
