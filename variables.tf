@@ -54,9 +54,9 @@ variable "cloud_sql_database" {
 }
 
 variable "cloud_sql_user" {
-  description = "Database user for Cloud SQL"
+  description = "Database user for Cloud SQL. Matches the actual prod user (the instance owner the apps connect as); NOT 'appuser' — that name never existed in prod and setting it forces a destructive google_sql_user replacement + password reset."
   type        = string
-  default     = "appuser"
+  default     = "zsynergy"
 }
 
 variable "cloud_sql_tier" {
@@ -185,15 +185,28 @@ variable "enable_cloudbuild_trigger" {
 
 # ─── API Load Balancer + Cloud Armor (staged, see api-loadbalancer.tf) ───────
 variable "enable_api_lb" {
-  description = "Provision the Global External ALB in front of the Spring Boot API with the Cloud Armor WAF attached. Default false: the LB resources are NOT created. Enabling is additive (does not disturb the existing App Hosting path); the DNS + ingress cutover remains a manual step. See api-loadbalancer.tf."
+  description = <<-EOT
+  Provision the Global External ALB in front of the Spring Boot API with the
+  Cloud Armor WAF attached. See api-loadbalancer.tf.
+
+  DEFAULT FLIPPED false -> true ON 2026-08-02, in the same change that made it
+  true in reality. The LB was APPLIED on that date (global IP 8.232.66.240,
+  backend `aeromontek-api-backend` with policy `aeromontek-api-waf` attached).
+
+  Leaving the default at false after applying is the documented `enable_*` trap:
+  terraform.tfvars is gitignored, so a clean checkout would plan count = 0 for
+  resources that exist and DESTROY them. For this stack that means releasing the
+  global IP -- and a released global IP does not come back. Verify against
+  `terraform state list` before ever flipping this to false.
+  EOT
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "api_lb_domain" {
-  description = "FQDN for the API load balancer's Google-managed SSL certificate (e.g. api.zsds.io). Required (non-empty) when enable_api_lb = true."
+  description = "FQDN for the API load balancer's Google-managed SSL certificate. Required (non-empty) when enable_api_lb = true. Certificate stays PROVISIONING until this name resolves to the LB IP."
   type        = string
-  default     = ""
+  default     = "api.zsds.io"
 }
 
 # ─── Service Accounts ────────────────────────────────────────────────────
@@ -320,6 +333,208 @@ variable "classifier_chroma_snapshot_bucket" {
   default     = "" # Falls back to GCS_BUCKET if set; empty = no GCS persistence
 }
 
+# ─── Cloud Run — graphsvc (Apache AGE, P4) ───────────────────────────────
+# APPLIED AND LIVE since 2026-07-23. This block used to read "authored, not
+# applied" with default = false, and that stayed false after the apply.
+#
+# The result, found 2026-07-31: terraform.tfvars is gitignored (.gitignore:33),
+# so a clean checkout evaluated enable_graphsvc = false, planned count = 0 for a
+# service that exists, and proposed destroying the live graphsvc Cloud Run
+# service, its service account, both project IAM bindings, the secret accessor
+# binding and all three invoker bindings. Eight deletions, no warning louder
+# than a plan line.
+#
+# The lesson is general: a default-OFF flag is honest only while the resource is
+# genuinely unapplied. Once applied, the default must be flipped to true in the
+# same change, or the flag silently becomes a delete instruction for anyone
+# without the untracked tfvars. Verified against `terraform state list` before
+# flipping — 8 graphsvc resources present.
+variable "enable_graphsvc" {
+  description = "Create the Apache AGE graphsvc Cloud Run service + its SA/IAM. TRUE because it is deployed and live — see the note above before changing."
+  type        = bool
+  default     = true
+}
+
+variable "graphsvc_service_name" {
+  description = "Cloud Run service name for the AGE graph service"
+  type        = string
+  default     = "aeromontek-graphsvc"
+}
+
+variable "graphsvc_image" {
+  description = "Docker image for graphsvc (combined Postgres+AGE + FastAPI). Built from classifier/infra/graphsvc.Dockerfile."
+  type        = string
+  default     = "us-docker.pkg.dev/zsynergy/zsynergy/aeromontek-graphsvc:latest"
+}
+
+variable "graphsvc_cpu" {
+  description = "CPU limit for graphsvc (Postgres+AGE + uvicorn in one container)"
+  type        = string
+  default     = "2"
+}
+
+variable "graphsvc_memory" {
+  description = "Memory limit in Gi for graphsvc"
+  type        = number
+  default     = 2
+}
+
+variable "graphsvc_concurrency" {
+  description = "Max concurrent requests per graphsvc instance (bounded pg8000 pool)"
+  type        = number
+  default     = 8
+}
+
+variable "graphsvc_min_instances" {
+  description = "Minimum instances for graphsvc (0 = scale-to-zero; graph rebuilds on cold start)"
+  type        = number
+  default     = 0
+}
+
+variable "graphsvc_max_instances" {
+  description = "Maximum instances for graphsvc"
+  type        = number
+  default     = 4
+}
+
+variable "graphsvc_graph_name" {
+  description = "AGE graph name (matches classifier config GRAPH_NAME / load_graph default)"
+  type        = string
+  default     = "aviation_records_kg"
+}
+
+variable "functions_runtime_sa" {
+  description = <<-EOT
+    Email of the Firebase Functions gen2 runtime service account that invokes
+    graphsvc over OIDC. Leave empty to fall back to the Compute Engine default
+    SA (<project-number>-compute@developer.gserviceaccount.com). Set this if the
+    functions codebase runs as a dedicated SA.
+  EOT
+  type        = string
+  default     = ""
+}
+
+# ─── Cloud Run — rastersvc (page rasterization, Spec E) ──────────────────
+# LIVE. See terraform/rastersvc.tf.
+#
+# APPLIED 2026-07-31, and the default was flipped to true IN THE SAME CHANGE —
+# which is precisely the step that was missed for graphsvc and left a live
+# service one clean-checkout apply away from deletion. See the note on
+# enable_graphsvc for what that costs.
+variable "enable_rastersvc" {
+  description = "Create the rastersvc Cloud Run service + its SA/IAM. TRUE because it is applied — see the note on enable_graphsvc before changing."
+  type        = bool
+  default     = true
+}
+
+variable "rastersvc_service_name" {
+  description = "Cloud Run service name for the page rasterization service"
+  type        = string
+  default     = "aeromontek-rastersvc"
+}
+
+variable "rastersvc_image" {
+  description = "Docker image for rastersvc. Built from classifier/Dockerfile.rastersvc."
+  type        = string
+  default     = "us-docker.pkg.dev/zsynergy/zsynergy/aeromontek-rastersvc:latest"
+}
+
+variable "rastersvc_cpu" {
+  description = "CPU limit for rastersvc. Rendering is CPU-bound; this is the knob that moves render latency."
+  type        = string
+  default     = "2"
+}
+
+variable "rastersvc_memory" {
+  description = "Memory limit in Gi. PyMuPDF holds one page bitmap at a time (150 DPI, max edge 2000px), not the document."
+  type        = number
+  default     = 2
+}
+
+variable "rastersvc_concurrency" {
+  description = "Max concurrent requests per instance. Low on purpose: one uvicorn worker, CPU-bound work, so extra requests contend for the same cores."
+  type        = number
+  default     = 4
+}
+
+variable "rastersvc_min_instances" {
+  description = "Minimum instances (0 = scale-to-zero). Rendering is lazy and the feature is not yet enabled; a warm instance would bill for something nothing calls. Raise to 1 when the viewer ships and a cold start lands on a user."
+  type        = number
+  default     = 0
+}
+
+variable "rastersvc_max_instances" {
+  description = "Maximum instances for rastersvc"
+  type        = number
+  default     = 10
+}
+
+variable "rastersvc_sync_pages" {
+  description = "Pages rendered before /render responds; the rest continue in a background task. Must match RASTER_SYNC_PAGES in rastersvc/app.py."
+  type        = number
+  default     = 3
+}
+
+variable "rastersvc_max_pages" {
+  description = "Hard ceiling on pages rendered per document. A bound against one pathological upload occupying an instance, not a tuning knob."
+  type        = number
+  default     = 500
+}
+
+variable "enable_officesvc" {
+  description = "Create the officesvc Cloud Run service + its SA/IAM. FALSE because it is authored but NOT YET APPLIED — flip to true in the SAME change that applies it, or a clean checkout plans to destroy it (see the note in officesvc.tf)."
+  type        = bool
+  default     = false
+}
+
+variable "officesvc_service_name" {
+  description = "Cloud Run service name for the document conversion service"
+  type        = string
+  default     = "aeromontek-officesvc"
+}
+
+variable "officesvc_image" {
+  description = "Docker image for officesvc. Built from classifier/Dockerfile.officesvc."
+  type        = string
+  default     = "us-docker.pkg.dev/zsynergy/zsynergy/aeromontek-officesvc:latest"
+}
+
+variable "officesvc_cpu" {
+  description = "CPU limit for officesvc. LibreOffice conversion is CPU-bound; this is the knob that moves conversion latency."
+  type        = string
+  default     = "2"
+}
+
+variable "officesvc_memory" {
+  description = "Memory limit in Gi. Higher than rastersvc on purpose: LibreOffice holds the WHOLE document model in memory, not one page — a large deck or spreadsheet is the peak, and a real 348-page corpus spreadsheet is what set this."
+  type        = number
+  default     = 4
+}
+
+variable "officesvc_concurrency" {
+  description = "Max concurrent requests per instance. ONE: a conversion is a CPU-bound soffice subprocess and two on an instance contend for the same cores."
+  type        = number
+  default     = 1
+}
+
+variable "officesvc_min_instances" {
+  description = "Minimum instances (0 = scale-to-zero). LibreOffice's first start is slow, so 0 means the first Office document a user opens waits on a cold suite. Raise to 1 if that latency is felt."
+  type        = number
+  default     = 0
+}
+
+variable "officesvc_max_instances" {
+  description = "Maximum instances for officesvc"
+  type        = number
+  default     = 5
+}
+
+variable "officesvc_convert_timeout" {
+  description = "Seconds before one conversion is abandoned. LibreOffice can hang on a malformed document and would otherwise hold the single worker indefinitely. Must match OFFICE_CONVERT_TIMEOUT in officesvc/convert.py."
+  type        = number
+  default     = 180
+}
+
 # ─── CORS (Centralized — shared by Spring Boot API + Classifier) ────────
 variable "cors_allowed_origins" {
   description = "Comma-separated CORS origins. Passed to both Cloud Run services via env var."
@@ -341,18 +556,26 @@ variable "enabled_apis" {
     "secretmanager.googleapis.com",
     "iam.googleapis.com",
     "cloudresourcemanager.googleapis.com",
-    "apphosting.googleapis.com",
+    # NOT "apphosting.googleapis.com" — that service does not exist. The real name
+    # is firebaseapphosting, and it is already ENABLED, so this line is a state
+    # adoption, not a change. The wrong name has been in this list since the initial
+    # commit and has never been adopted: every apply failed on it and left the other
+    # 19 APIs enabled, which is why nobody noticed.
+    "firebaseapphosting.googleapis.com",
     "firebase.googleapis.com",
     "firestore.googleapis.com",
     "cloudkms.googleapis.com",
     "logging.googleapis.com",
     "monitoring.googleapis.com",
-    "errorreporting.googleapis.com",
+    # Same: the real name is clouderrorreporting.googleapis.com.
+    "clouderrorreporting.googleapis.com",
     "cloudtrace.googleapis.com",
     "sqladmin.googleapis.com",
     "servicenetworking.googleapis.com",
     "compute.googleapis.com",
-    "cloudtasks.googleapis.com", # drive-file-transfers queue (T27, cloudtasks.tf)
+    "cloudtasks.googleapis.com",     # drive-file-transfers queue (T27, cloudtasks.tf)
+    "bigquery.googleapis.com",       # extraction cost model (bigquery_extraction_cost.tf), analytics sinks
+    "cloudscheduler.googleapis.com", # nightly retrain / membership-reconcile / reference-refresh jobs
   ]
 }
 
@@ -378,6 +601,7 @@ variable "alert_email_recipients" {
     "chandra@vxlllc.com",
     "synergy-admin-group@vxlllc.com",
     "synergy-ops-admin-group@vxlllc.com",
+    "sales-zsds@zsds.io", # kept: terraform-managed "AeroMontek alerts →" channel exists in prod
   ]
 }
 
@@ -506,15 +730,15 @@ variable "reference_refresh_cron" {
 
 # ─── Cloud Tasks — drive-file-transfers queue (T27, cloudtasks.tf) ───────
 variable "transfer_queue_max_concurrent_dispatches" {
-  description = "Max simultaneously-running drive-file-transfers tasks (= concurrent Box connections from the transfer fan-out). Kept well under springboot_concurrency (40) x springboot_max_instances (10) = 400, and modest for Cloud NAT + Box API rate limits."
+  description = "Max simultaneously-running drive-file-transfers tasks (= concurrent Box connections from the transfer fan-out). Kept well under springboot_concurrency (40) x springboot_max_instances (10) = 400, and modest for Cloud NAT + Box API rate limits. Matches the live prod queue (20) to keep terraform zero-diff."
   type        = number
-  default     = 30
+  default     = 20
 }
 
 variable "transfer_queue_max_dispatches_per_second" {
-  description = "Max dispatch rate for the drive-file-transfers queue. Bounds burst rate against Box + Cloud NAT, well under Cloud Tasks' unbounded default (~500/s)."
+  description = "Max dispatch rate for the drive-file-transfers queue. Bounds burst rate against Box + Cloud NAT, well under Cloud Tasks' unbounded default (~500/s). Matches the live prod queue (10) to keep terraform zero-diff."
   type        = number
-  default     = 20
+  default     = 10
 }
 
 variable "transfer_queue_max_attempts" {

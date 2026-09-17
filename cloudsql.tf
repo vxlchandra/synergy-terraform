@@ -107,3 +107,56 @@ resource "google_secret_manager_secret_iam_member" "classifier_db_password" {
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.classifier[0].email}"
 }
+
+# -----------------------------------------------------------------------------
+# graphsvc read-only DB login (SYN review, phase-b-infra) — replaces sharing
+# the instance-owner ("zsynergy") credential with graphsvc, which only reads
+# the source `extractions` rows to rebuild its derived graph (graphsvc.tf).
+# A dedicated login means a compromised graphsvc gets read access to one
+# table, not the owner's full read/write/DDL privileges on the whole database.
+# -----------------------------------------------------------------------------
+resource "random_password" "graphsvc_db_password" {
+  length  = 32
+  special = true
+}
+
+resource "google_secret_manager_secret" "graphsvc_db_password" {
+  secret_id = "aeromon-graphsvc-db-password"
+  project   = var.project_id
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+}
+
+resource "google_secret_manager_secret_version" "graphsvc_db_password" {
+  secret      = google_secret_manager_secret.graphsvc_db_password.id
+  secret_data = random_password.graphsvc_db_password.result
+}
+
+# google_sql_user only creates the login; it does not grant table-level
+# privileges (the google provider has no Postgres GRANT resource, and this
+# repo carries no postgresql provider). After first apply, run once against
+# the shared instance as the zsynergy owner:
+#
+#   GRANT CONNECT ON DATABASE <var.cloud_sql_database> TO graphsvc_reader;
+#   GRANT USAGE ON SCHEMA public TO graphsvc_reader;
+#   GRANT SELECT ON extractions TO graphsvc_reader;
+#
+# Until that GRANT runs, graphsvc_reader can log in but reads nothing —
+# fails closed, not open.
+resource "google_sql_user" "graphsvc_reader" {
+  count    = var.enable_graphsvc ? 1 : 0
+  name     = "graphsvc_reader"
+  instance = google_sql_database_instance.postgres.name
+  password = random_password.graphsvc_db_password.result
+  project  = var.project_id
+
+  lifecycle {
+    ignore_changes = [password]
+  }
+}

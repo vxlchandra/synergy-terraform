@@ -1,0 +1,241 @@
+# =============================================================================
+# rastersvc.tf — page rasterization service for document viewer v1 (Spec E)
+# =============================================================================
+#
+# LIVE. `enable_rastersvc` defaults to TRUE (applied 2026-07-31 alongside the
+# graphsvc default fix — same class of "clean checkout plans a destroy"
+# trap). A plan from a clean checkout is a no-op today. Same posture as
+# graphsvc.tf, which this file mirrors. (Corrected in review: this comment
+# previously said "AUTHORED, NOT APPLIED" / "defaults to false", stale since
+# the enable_rastersvc flip elsewhere in this branch's history.)
+#
+# WHY A SEPARATE SERVICE. The classifier runs at concurrency 5 and is already
+# the platform's throughput bottleneck. Rasterizing a 400-page manual inside
+# those instances would evict classification work. Same repository, different
+# image (classifier/Dockerfile.rastersvc), different service, independent
+# scaling.
+#
+# WHY THIS IS TERRAFORM AND NOT `gcloud run deploy --no-allow-unauthenticated`.
+# The service and its `run.invoker` binding are infrastructure: reviewed as
+# code, reproducible, and visible in state. A service created imperatively is
+# invisible to `terraform plan` and the next apply fights it. `--no-allow-
+# unauthenticated` is only the imperative spelling of "grant no binding to
+# allUsers" — which is the default here, since the sole binding below names one
+# service account.
+
+# --- Service Account ---------------------------------------------------------
+resource "google_service_account" "rastersvc" {
+  count        = var.enable_rastersvc ? 1 : 0
+  account_id   = "${var.sa_prefix}-rastersvc"
+  display_name = "ZSDS rastersvc (page rasterization) Service Account"
+  project      = var.project_id
+}
+
+# --- IAM roles ---------------------------------------------------------------
+# Reads the original document, writes rendered pages under _rendered/. Mirrors
+# the classifier's split deliberately: objectViewer (get + list) plus
+# objectCreator (create; overwrite implicit) and NO delete. A renderer that
+# cannot delete cannot destroy a customer's source document, whatever a bug or
+# a crafted object path asks it to do. Rendered pages are expired by a bucket
+# lifecycle rule, not by this service.
+#
+# Scoped to the buckets that actually hold customer documents — NOT
+# `google_project_iam_member`, which the classifier's own grant uses but
+# which also covers the classifier's model-artifact bucket and any future
+# project buckets.
+#
+# THREE buckets, not two: this file originally scoped only to the
+# Terraform-managed `documents`/`uploads` buckets (storage.tf). Caught on
+# review before merge — the Spring Boot API (which invokes rastersvc,
+# RasterService.java) is deployed with GCS_BUCKET hardcoded to
+# `<project>.firebasestorage.app` (cloudbuild.yaml:399, every deploy script),
+# the Firebase Storage default bucket. That bucket predates this Terraform
+# root and has no `google_storage_bucket` resource here to reference, so the
+# grant below targets it by literal name. Keeping the documents/uploads
+# grants too rather than dropping them: nothing here confirms they're
+# actually dead, and keeping is strictly safer than a guess that removes
+# access. This IS still a strict subset of the project-wide grant it
+# replaces, so it cannot remove access this LIVE service depends on today.
+resource "google_storage_bucket_iam_member" "rastersvc_firebase_default_viewer" {
+  count  = var.enable_rastersvc ? 1 : 0
+  bucket = "${var.project_id}.firebasestorage.app"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.rastersvc[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "rastersvc_firebase_default_creator" {
+  count  = var.enable_rastersvc ? 1 : 0
+  bucket = "${var.project_id}.firebasestorage.app"
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.rastersvc[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "rastersvc_documents_viewer" {
+  count  = var.enable_rastersvc ? 1 : 0
+  bucket = google_storage_bucket.documents.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.rastersvc[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "rastersvc_documents_creator" {
+  count  = var.enable_rastersvc ? 1 : 0
+  bucket = google_storage_bucket.documents.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.rastersvc[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "rastersvc_uploads_viewer" {
+  count  = var.enable_rastersvc ? 1 : 0
+  bucket = google_storage_bucket.uploads.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.rastersvc[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "rastersvc_uploads_creator" {
+  count  = var.enable_rastersvc ? 1 : 0
+  bucket = google_storage_bucket.uploads.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.rastersvc[0].email}"
+}
+
+resource "google_project_iam_member" "rastersvc_logging" {
+  count   = var.enable_rastersvc ? 1 : 0
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.rastersvc[0].email}"
+}
+
+# --- Cloud Run service -------------------------------------------------------
+resource "google_cloud_run_v2_service" "rastersvc" {
+  count    = var.enable_rastersvc ? 1 : 0
+  name     = var.rastersvc_service_name
+  location = var.region
+  project  = var.project_id
+
+  # The deploy owns image, env and scaling at runtime; Terraform owns the
+  # service's existence, identity and who may invoke it. Same split as graphsvc
+  # and the classifier.
+  lifecycle {
+    ignore_changes = all
+
+    # DO NOT REMOVE. `enable_rastersvc` now defaults to TRUE (this service is
+    # LIVE), but terraform.tfvars is still gitignored — so a checkout without
+    # it, before that default was corrected, would have planned `count = 0`
+    # and silently DESTROYED this service. That is not hypothetical: on
+    # 2026-07-31 a plan from a clean checkout proposed destroying the LIVE
+    # graphsvc service and its SA for exactly this reason. prevent_destroy
+    # converts that silent deletion into a hard error regardless of what the
+    # default is set to. Tearing rastersvc down deliberately means editing
+    # this block first — which is the point.
+    prevent_destroy = true
+  }
+
+  template {
+    service_account = google_service_account.rastersvc[0].email
+
+    containers {
+      image = var.rastersvc_image
+
+      ports {
+        container_port = 8080
+      }
+
+      resources {
+        # ALWAYS-ALLOCATED CPU, deliberately. /render returns after the first
+        # RASTER_SYNC_PAGES pages and finishes the rest in a FastAPI
+        # BackgroundTasks callback (rastersvc/app.py:164). Cloud Run throttles
+        # CPU to near zero outside a request unless cpu_idle is false, so with
+        # the default the background pages of a long document would crawl or
+        # stall until some later request happened to wake the instance — and
+        # the cache would sit permanently partial. CacheState.complete rejects
+        # a partial render, so that failure mode is silent-but-slow rather than
+        # wrong. Combined with min_instance_count = 0 the billed window is the
+        # render plus the idle timeout, not the day.
+        cpu_idle = false
+
+        # Shortens the cold start a lazy first render pays, in the user's view.
+        startup_cpu_boost = true
+
+        limits = {
+          cpu    = var.rastersvc_cpu
+          memory = "${var.rastersvc_memory}Gi"
+        }
+      }
+
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT"
+        value = var.project_id
+      }
+
+      # Pages rendered before /render responds. The rest continue in the
+      # background task above.
+      env {
+        name  = "RASTER_SYNC_PAGES"
+        value = tostring(var.rastersvc_sync_pages)
+      }
+
+      # Hard ceiling on pages per document. A bound, not a tuning knob: without
+      # it one pathological upload can occupy an instance indefinitely.
+      env {
+        name  = "RASTER_MAX_PAGES"
+        value = tostring(var.rastersvc_max_pages)
+      }
+    }
+
+    scaling {
+      min_instance_count = var.rastersvc_min_instances # 0 = scale-to-zero
+      max_instance_count = var.rastersvc_max_instances
+    }
+
+    # Rendering is CPU-bound and the image runs a single uvicorn worker, so
+    # concurrent requests on one instance contend for the same cores. Cloud Run
+    # scales by adding instances; this stays low on purpose.
+    max_instance_request_concurrency = var.rastersvc_concurrency
+
+    # A long document's background render must outlive the response. This is the
+    # instance's request timeout, not the sync path, which returns in ~1s.
+    timeout = "900s"
+
+    # No vpc_access block: rastersvc talks only to GCS, over Google's network.
+    # graphsvc needs the VPC because it reaches Cloud SQL; adding a connector
+    # here would buy nothing and add a failure mode.
+
+    labels = {
+      app       = "aeromontek"
+      component = "rastersvc"
+      tier      = "backend"
+    }
+  }
+
+  # Internal-only. Nothing outside the platform has any reason to reach a
+  # renderer, and the browser must not: it receives rendered pages through the
+  # Spring API, which authorizes the document first.
+  ingress      = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  launch_stage = "GA"
+}
+
+# --- Cloud Run IAM — who may invoke rastersvc --------------------------------
+# ONE binding, by design. graphsvc grants three because three services query the
+# graph; rastersvc is called by the Spring API alone (RasterRenderClient), which
+# has already run the document's authorization check. The classifier and the
+# Functions runtime deliberately get nothing — an extra invoker here would be an
+# extra path to rendered customer pages that no code needs.
+resource "google_cloud_run_v2_service_iam_member" "springboot_invokes_rastersvc" {
+  count    = var.enable_rastersvc && var.enable_springboot ? 1 : 0
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.rastersvc[0].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.springboot[0].email}"
+}
+
+# --- Outputs -----------------------------------------------------------------
+output "rastersvc_url" {
+  description = "rastersvc Cloud Run URL — the OIDC audience for the Spring RasterRenderClient."
+  value       = var.enable_rastersvc ? google_cloud_run_v2_service.rastersvc[0].uri : "disabled"
+}
+
+output "rastersvc_service_account" {
+  description = "rastersvc runtime service account email."
+  value       = var.enable_rastersvc ? google_service_account.rastersvc[0].email : "disabled"
+}

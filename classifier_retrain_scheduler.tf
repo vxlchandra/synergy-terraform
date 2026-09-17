@@ -1,0 +1,126 @@
+# Nightly trained-head retrain trigger (P3 confirmation loop).
+#
+# Cloud Scheduler POSTs the classifier `/admin/retrain-head`; that endpoint refits the
+# trained head from `confirmed_exemplars`, republishes it to the `gs://` HEAD_PATH, and
+# hot-reloads the engine. Gated on `enable_classifier` and applied only at deploy
+# sign-off. Server-side no-op until enough exemplars exist (train_and_save refuses
+# < 4 examples / < 2 sections), so it is safe to enable early.
+#
+# Auth is two-layer, matching the platform's service-to-service calls to the classifier:
+#   1. OIDC token (audience = classifier URL) via the classifier SA  -> Cloud Run IAM.
+#   2. X-Internal-Secret header (var below)                          -> app require_internal_auth.
+
+variable "classifier_retrain_cron" {
+  description = "Cron schedule (UTC) for the nightly classifier trained-head retrain."
+  type        = string
+  default     = "0 7 * * *" # 07:00 UTC daily (low-traffic window)
+}
+
+variable "classifier_internal_secret" {
+  description = <<-EOT
+    App-level shared secret for the classifier require_internal_auth gate, sent as the
+    X-Internal-Secret header by the retrain scheduler. Managed in Secret Manager and
+    supplied at apply time; leave empty in dev. The OIDC token satisfies Cloud Run IAM;
+    this satisfies the classifier's app-level auth.
+  EOT
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+# The scheduler's OIDC identity (classifier SA) must be allowed to invoke the classifier.
+variable "enable_classifier_retrain" {
+  description = <<-EOT
+  Create the nightly trained-head retrain scheduler.
+
+  DEFAULT FALSE, DELIBERATELY. This is NOT the same decision as deploying the
+  classifier, and it must not ride on `enable_classifier` (which is true and must
+  stay true -- flipping that destroys the classifier Cloud Run service itself).
+
+  As authored, the job POSTs an EMPTY body, which the endpoint interprets as
+  "all tenants": every tenant's confirmed exemplars are pooled into ONE trained
+  head, which is then hot-reloaded into the live engine. The validation gate and
+  artifact versioning both default OFF and are set nowhere in this repo, and
+  there is no rollback path.
+
+  Do not enable until, at minimum:
+    1. the request body scopes to a single tenant, or the endpoint refuses an
+       unscoped retrain;
+    2. the validation gate is ON and checks ITEM accuracy, not only section;
+    3. artifact versioning is ON so a bad head can be rolled back;
+    4. promotion is validated against a held-out set before hot-reload.
+
+  Added on review before phase-b-infra merged (not yet addressed — this job
+  runs as the highly-privileged classifier SA rather than a scheduler-only
+  identity, and none of these have app-side support yet):
+    5. a dedicated scheduler-only SA invokes the endpoint, not the classifier
+       runtime SA itself — the retrain trigger should not carry the same
+       privileges as the service being retrained;
+    6. classifier_internal_secret is a Terraform `sensitive` string — that
+       only redacts CLI/plan OUTPUT, it still lands in Terraform state and in
+       this Scheduler job's stored HTTP headers in GCP. Do not treat
+       `sensitive = true` as equivalent to "not persisted anywhere";
+    7. an empty classifier_internal_secret (today's default) must be rejected
+       at apply time or by the endpoint, not silently create a permanently-
+       failing job;
+    8. the retrain is a non-idempotent model overwrite + hot-reload. Cloud
+       Scheduler's own retry can duplicate a delivery; an idempotency key
+       (e.g. derived from the schedule's own timestamp) or a distributed lock
+       is required before retry_count can safely be > 0 with this side effect;
+    9. attempt_deadline should be set to at least the verified worst-case
+       retrain runtime once one is measured — currently unset (defaults to
+       this job's own 180s HTTP target default, likely too short for a real
+       refit + hot-reload).
+  EOT
+  type        = bool
+  default     = false
+}
+
+resource "google_cloud_run_v2_service_iam_member" "classifier_retrain_invoker" {
+  count    = var.enable_classifier && var.enable_classifier_retrain ? 1 : 0
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.classifier[0].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.classifier[0].email}"
+}
+
+resource "google_cloud_scheduler_job" "classifier_retrain_head" {
+  count   = var.enable_classifier && var.enable_classifier_retrain ? 1 : 0
+  project = var.project_id
+  region  = var.region
+  name    = "classifier-retrain-head-nightly"
+
+  description = "Nightly: refit the classifier trained head from confirmed exemplars (P3 loop)"
+  schedule    = var.classifier_retrain_cron
+  time_zone   = "UTC"
+
+  retry_config {
+    retry_count          = 1
+    min_backoff_duration = "60s"
+    max_backoff_duration = "300s"
+  }
+
+  http_target {
+    http_method = "POST"
+    uri         = "${google_cloud_run_v2_service.classifier[0].uri}/admin/retrain-head"
+
+    headers = {
+      "Content-Type"      = "application/json"
+      "X-Internal-Secret" = var.classifier_internal_secret
+    }
+
+    body = base64encode(jsonencode({})) # all tenants; pass {"tenant": "..."} to scope
+
+    oidc_token {
+      service_account_email = google_service_account.classifier[0].email
+      audience              = google_cloud_run_v2_service.classifier[0].uri
+    }
+  }
+
+  depends_on = [
+    google_cloud_run_v2_service.classifier,
+    google_cloud_run_v2_service_iam_member.classifier_retrain_invoker,
+    google_project_service.required_apis["cloudscheduler.googleapis.com"],
+  ]
+}
