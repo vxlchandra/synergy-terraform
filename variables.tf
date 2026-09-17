@@ -482,9 +482,22 @@ variable "rastersvc_max_pages" {
 }
 
 variable "enable_officesvc" {
-  description = "Create the officesvc Cloud Run service + its SA/IAM. FALSE because it is authored but NOT YET APPLIED — flip to true in the SAME change that applies it, or a clean checkout plans to destroy it (see the note in officesvc.tf)."
+  description = <<-EOT
+  Create the officesvc Cloud Run service + its SA/IAM.
+
+  LIVE — default corrected on review before an actual `terraform plan` was
+  ever run against real state (2026-09-17). `terraform state list` shows
+  google_cloud_run_v2_service.officesvc[0], its SA, and its IAM bindings all
+  already exist. The header in officesvc.tf and this description previously
+  said "AUTHORED, NOT APPLIED" / default false, and BOTH were wrong — this
+  was the exact graphsvc/rastersvc "clean-checkout plans a destroy" trap that
+  same file's own comment warns about, just never caught here because no one
+  had generated a real plan since it was actually deployed. prevent_destroy
+  was already present (someone had learned the graphsvc lesson), which is
+  the only reason this surfaced as a hard error instead of a silent apply.
+  EOT
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "officesvc_service_name" {

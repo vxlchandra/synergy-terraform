@@ -37,9 +37,15 @@ resource "google_sql_database_instance" "postgres" {
 
     ip_configuration {
       # Private IP only — no public IP. Eliminates Google suspicious activity alerts.
-      ipv4_enabled                                  = false
-      private_network                               = google_compute_network.aeromontek_vpc.id
-      require_ssl                                   = true
+      ipv4_enabled    = false
+      private_network = google_compute_network.aeromontek_vpc.id
+      # require_ssl was removed as of a mid-provider-7.x google provider
+      # release (not just deprecated — a hard schema error, "Unsupported
+      # argument", blocking every plan/apply on this resource). ssl_mode =
+      # "ENCRYPTED_ONLY" is the modern equivalent/superset and was already
+      # present alongside it; this resource also has lifecycle.ignore_changes
+      # = all, so removing the dead argument changes no live behavior, only
+      # unblocks parsing this config against the currently-locked provider.
       ssl_mode                                      = "ENCRYPTED_ONLY"
       enable_private_path_for_google_cloud_services = true
     }
