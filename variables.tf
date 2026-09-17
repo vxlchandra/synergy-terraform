@@ -393,6 +393,36 @@ variable "alert_dlq_window_seconds" {
   default     = 300
 }
 
+# ─── SYN-1802: ingestion-delivery canary + passive divergence monitor ───
+# The 2026-08-22 to 09-01 incident had onIngestionActivated silently stop
+# firing for 9 days, producing ZERO application-level error logs — every
+# other alert here is error-rate-based, so this trap needed its own signal.
+variable "alert_ingestion_canary_absence_window_seconds" {
+  description = "How long the ingestion canary's ack metric may be silent before paging — sized to the canary's own 15-minute interval plus a grace period. Found by Codex review: log-based metric data can take up to ~10 minutes to appear in Cloud Monitoring after the log write, so a window of exactly (interval + small grace) races the next real ack against that ingestion lag. 35 minutes leaves real margin: 15-minute interval + up to 10 minutes of metric-ingestion lag + a further grace period."
+  type        = number
+  default     = 2100 # 35 minutes
+  validation {
+    condition     = var.alert_ingestion_canary_absence_window_seconds % 60 == 0 && var.alert_ingestion_canary_absence_window_seconds > 0
+    error_message = "Cloud Monitoring condition durations must be a positive multiple of 60 seconds."
+  }
+}
+
+variable "alert_ingestion_divergence_window_seconds" {
+  description = "Rolling window the passive divergence monitor compares active_ingestions write volume against onIngestionActivated invocation volume over."
+  type        = number
+  default     = 1800 # 30 minutes
+  validation {
+    condition     = var.alert_ingestion_divergence_window_seconds % 60 == 0 && var.alert_ingestion_divergence_window_seconds > 0
+    error_message = "Cloud Monitoring condition durations must be a positive multiple of 60 seconds."
+  }
+}
+
+variable "alert_ingestion_divergence_ratio_threshold" {
+  description = "Fraction of writes lacking a matching invocation, sustained for the window above, that triggers the divergence alert. 0.5 means writes outpacing invocations by 2x."
+  type        = number
+  default     = 0.5
+}
+
 # ─── Pub/Sub ─────────────────────────────────────────────────────────────
 variable "pubsub_topics" {
   description = "Pub/Sub topics to create"
