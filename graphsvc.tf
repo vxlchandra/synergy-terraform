@@ -2,9 +2,12 @@
 # graphsvc.tf — Apache AGE graph service (P4 of the pdf-classifier merge)
 # =============================================================================
 #
-# AUTHORED, NOT APPLIED. `enable_graphsvc` defaults to false so a plan/apply on
-# the existing state is a no-op until an operator flips it on. See
-# classifier/infra/GRAPHSVC_DEPLOY.md for the human-confirmed apply runbook.
+# LIVE. `enable_graphsvc` defaults to TRUE — this service is deployed (see the
+# prevent_destroy note below); a clean-checkout plan is a no-op today. See
+# classifier/infra/GRAPHSVC_DEPLOY.md for the human-confirmed apply runbook
+# this was originally deployed from. (Corrected in review: this comment
+# previously said "AUTHORED, NOT APPLIED" / "defaults to false", stale since
+# the enable_graphsvc flip below.)
 #
 # ARCHITECTURE (locked 2026-07-19): Cloud SQL cannot host the Apache AGE
 # extension, so Postgres+AGE runs INSIDE this scale-to-zero Cloud Run container.
@@ -45,11 +48,16 @@ resource "google_project_iam_member" "graphsvc_logging" {
   member  = "serviceAccount:${google_service_account.graphsvc[0].email}"
 }
 
-# Read the shared Cloud SQL password secret (same secret the classifier uses).
+# Read graphsvc's OWN read-only DB password secret (cloudsql.tf), not the
+# shared owner-credential secret the classifier/springboot use. graphsvc only
+# ever reads the `extractions` table to rebuild its derived graph; giving it
+# the owner credential would hand full DB privileges to whatever compromises
+# this service. See cloudsql.tf's graphsvc_reader block for the one-time
+# manual GRANT this depends on.
 resource "google_secret_manager_secret_iam_member" "graphsvc_db_password" {
   count     = var.enable_graphsvc ? 1 : 0
   project   = var.project_id
-  secret_id = google_secret_manager_secret.secrets["aeromon-db-password"].secret_id
+  secret_id = google_secret_manager_secret.graphsvc_db_password.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.graphsvc[0].email}"
 }
@@ -66,9 +74,11 @@ resource "google_cloud_run_v2_service" "graphsvc" {
   lifecycle {
     ignore_changes = all
 
-    # DO NOT REMOVE. This service IS DEPLOYED AND LIVE, but `enable_graphsvc`
-    # still defaults to false and terraform.tfvars is gitignored. A plan from a
-    # clean checkout on 2026-07-31 therefore proposed:
+    # DO NOT REMOVE. This service IS DEPLOYED AND LIVE. `enable_graphsvc` now
+    # defaults to true (fixed below in this branch's history), but
+    # terraform.tfvars is still gitignored, so prevent_destroy stays as the
+    # backstop. A plan from a clean checkout on 2026-07-31, before that fix,
+    # proposed:
     #   google_cloud_run_v2_service.graphsvc[0] will be destroyed
     #   (because index [0] is out of range for count)
     # along with its service account, both project IAM bindings, the secret
@@ -134,15 +144,22 @@ resource "google_cloud_run_v2_service" "graphsvc" {
         name  = "DB_NAME"
         value = var.cloud_sql_database
       }
+      # Dedicated read-only login (cloudsql.tf: google_sql_user.graphsvc_reader),
+      # NOT var.cloud_sql_user (the instance owner) — see the secret-access
+      # comment above. NOTE: this template has `lifecycle.ignore_changes = all`
+      # (deploy script owns runtime env), so this codifies the intended state
+      # for RECREATION only — it does not by itself rotate the LIVE service's
+      # env vars. An operator must apply the one-time SQL GRANT (cloudsql.tf)
+      # then run `gcloud run services update` to rotate the live credential.
       env {
         name  = "DB_USER"
-        value = var.cloud_sql_user
+        value = "graphsvc_reader"
       }
       env {
         name = "DB_PASSWORD"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secrets["aeromon-db-password"].secret_id
+            secret  = google_secret_manager_secret.graphsvc_db_password.secret_id
             version = "latest"
           }
         }

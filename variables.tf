@@ -574,7 +574,9 @@ variable "enabled_apis" {
     "sqladmin.googleapis.com",
     "servicenetworking.googleapis.com",
     "compute.googleapis.com",
-    "cloudtasks.googleapis.com", # drive-file-transfers queue (T27, cloudtasks.tf)
+    "cloudtasks.googleapis.com",     # drive-file-transfers queue (T27, cloudtasks.tf)
+    "bigquery.googleapis.com",       # extraction cost model (bigquery_extraction_cost.tf), analytics sinks
+    "cloudscheduler.googleapis.com", # nightly retrain / membership-reconcile / reference-refresh jobs
   ]
 }
 

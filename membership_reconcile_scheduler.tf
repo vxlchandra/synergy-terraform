@@ -23,6 +23,20 @@
 #
 # The endpoint REPORTS and repairs nothing, so a duplicate or retried run is
 # harmless — which is why retry_config is permitted to retry at all.
+#
+# KNOWN GAP (found on review before phase-b-infra merged, deliberately NOT
+# fixed here — the fix is in aeromontek-api, a different repo, and adding it
+# here would be scope creep on a Terraform-only PR): this job's OIDC token
+# uses google_service_account.springboot, the SAME identity the whole
+# springboot Cloud Run service runs as generally, not a job-specific identity.
+# Spring's security chain for /api/internal/reconcile/** (SecurityConfig.java)
+# validates that the caller presents a Google-issued OIDC token, but does NOT
+# constrain WHICH service-account subject sent it — so any identity holding
+# run.invoker on this Cloud Run service (springboot's IAM policy includes
+# allUsers) can call this endpoint, not just this scheduler job. Low actual
+# risk today only because the endpoint is report-only; still needs an
+# app-side fix (validate token `email`/`sub` against an expected scheduler SA)
+# before this pattern is reused for anything that mutates state.
 
 variable "enable_membership_reconciler" {
   description = "Create the nightly membership reconciliation Cloud Scheduler job (ADR 0034 stage 1)."
@@ -69,7 +83,10 @@ resource "google_cloud_scheduler_job" "membership_reconcile" {
     }
   }
 
-  depends_on = [google_cloud_run_v2_service.springboot]
+  depends_on = [
+    google_cloud_run_v2_service.springboot,
+    google_project_service.required_apis["cloudscheduler.googleapis.com"],
+  ]
 }
 
 output "membership_reconcile_job" {

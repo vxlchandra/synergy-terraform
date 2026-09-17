@@ -36,18 +36,36 @@ resource "google_service_account" "officesvc" {
 # objectViewer + objectCreator and NO delete, matching rastersvc: a converter
 # that cannot delete cannot destroy a customer's source document, whatever a
 # bug or a crafted object path asks it to do.
-resource "google_project_iam_member" "officesvc_storage_viewer" {
-  count   = var.enable_officesvc ? 1 : 0
-  project = var.project_id
-  role    = "roles/storage.objectViewer"
-  member  = "serviceAccount:${google_service_account.officesvc[0].email}"
+#
+# Scoped to the two buckets that actually hold customer documents (documents,
+# uploads) — see rastersvc.tf's identical fix for why this replaces
+# `google_project_iam_member`.
+resource "google_storage_bucket_iam_member" "officesvc_documents_viewer" {
+  count  = var.enable_officesvc ? 1 : 0
+  bucket = google_storage_bucket.documents.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.officesvc[0].email}"
 }
 
-resource "google_project_iam_member" "officesvc_storage_creator" {
-  count   = var.enable_officesvc ? 1 : 0
-  project = var.project_id
-  role    = "roles/storage.objectCreator"
-  member  = "serviceAccount:${google_service_account.officesvc[0].email}"
+resource "google_storage_bucket_iam_member" "officesvc_documents_creator" {
+  count  = var.enable_officesvc ? 1 : 0
+  bucket = google_storage_bucket.documents.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.officesvc[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "officesvc_uploads_viewer" {
+  count  = var.enable_officesvc ? 1 : 0
+  bucket = google_storage_bucket.uploads.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.officesvc[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "officesvc_uploads_creator" {
+  count  = var.enable_officesvc ? 1 : 0
+  bucket = google_storage_bucket.uploads.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.officesvc[0].email}"
 }
 
 resource "google_project_iam_member" "officesvc_logging" {

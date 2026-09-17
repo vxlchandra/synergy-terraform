@@ -3,7 +3,12 @@
 #                               organization → company)
 # =============================================================================
 # 🔴 NOT APPLIED. Authored only. `terraform plan` / `bq query --dry_run` were
-#    run; nothing was created in production.
+#    run; nothing was created in production. Gated on `enable_extraction_cost_model`
+#    (default false) — this file previously had NO gate on its 6 resources, so a
+#    clean-checkout `terraform apply` would have created them (or failed if a
+#    same-named table/view already existed outside state). Found in review before
+#    merge; see `enable_graphsvc`'s history for what an unguarded "not applied"
+#    claim costs once state and reality diverge.
 #
 # WHY THIS FILE EXISTS
 # --------------------
@@ -54,12 +59,29 @@ variable "extraction_cost_deletion_protection" {
   default     = true
 }
 
+variable "enable_extraction_cost_model" {
+  description = <<-EOT
+    Create the extraction-cost BigQuery dimension/views in this file.
+
+    DEFAULT FALSE. This file is authored-only (see header) — nothing here has
+    been applied to production. Flip to true only in a reviewed apply, after
+    confirming no same-named table/view already exists in the `analytics`
+    dataset outside Terraform state (this file's own header notes the
+    hand-created `v_admin_*`/`v_biller_*` views as exactly that kind of
+    drift). Update the header's NOT APPLIED note when this is enabled.
+  EOT
+  type        = bool
+  default     = false
+}
+
 # The dataset already exists and holds production data — read it, never manage
 # it. A `google_bigquery_dataset` resource here would let a stray destroy take
 # the warehouse with it.
 data "google_bigquery_dataset" "analytics" {
   project    = var.project_id
   dataset_id = var.analytics_dataset_id
+
+  depends_on = [google_project_service.required_apis["bigquery.googleapis.com"]]
 }
 
 # -----------------------------------------------------------------------------
@@ -79,6 +101,7 @@ data "google_bigquery_dataset" "analytics" {
 # row here rolls up to the sentinel 'UNATTRIBUTED' — visible, never silently
 # dropped from the company total.
 resource "google_bigquery_table" "dim_project_organization" {
+  count               = var.enable_extraction_cost_model ? 1 : 0
   project             = var.project_id
   dataset_id          = data.google_bigquery_dataset.analytics.dataset_id
   table_id            = "dim_project_organization"
@@ -102,6 +125,7 @@ resource "google_bigquery_table" "dim_project_organization" {
 # 2. Per-document extraction cost (the grain everything else rolls up from)
 # -----------------------------------------------------------------------------
 resource "google_bigquery_table" "v_extraction_cost_by_document" {
+  count               = var.enable_extraction_cost_model ? 1 : 0
   project             = var.project_id
   dataset_id          = data.google_bigquery_dataset.analytics.dataset_id
   table_id            = "v_extraction_cost_by_document"
@@ -122,6 +146,7 @@ resource "google_bigquery_table" "v_extraction_cost_by_document" {
 # 3. Rollups: project -> organization -> company
 # -----------------------------------------------------------------------------
 resource "google_bigquery_table" "v_extraction_cost_by_project_daily" {
+  count               = var.enable_extraction_cost_model ? 1 : 0
   project             = var.project_id
   dataset_id          = data.google_bigquery_dataset.analytics.dataset_id
   table_id            = "v_extraction_cost_by_project_daily"
@@ -141,6 +166,7 @@ resource "google_bigquery_table" "v_extraction_cost_by_project_daily" {
 }
 
 resource "google_bigquery_table" "v_extraction_cost_by_organization_daily" {
+  count               = var.enable_extraction_cost_model ? 1 : 0
   project             = var.project_id
   dataset_id          = data.google_bigquery_dataset.analytics.dataset_id
   table_id            = "v_extraction_cost_by_organization_daily"
@@ -163,6 +189,7 @@ resource "google_bigquery_table" "v_extraction_cost_by_organization_daily" {
 }
 
 resource "google_bigquery_table" "v_extraction_cost_company_daily" {
+  count               = var.enable_extraction_cost_model ? 1 : 0
   project             = var.project_id
   dataset_id          = data.google_bigquery_dataset.analytics.dataset_id
   table_id            = "v_extraction_cost_company_daily"
@@ -187,6 +214,7 @@ resource "google_bigquery_table" "v_extraction_cost_company_daily" {
 # This is the view that PROVES the sieve works (or does not). Without it the
 # only claim available is "we added engines".
 resource "google_bigquery_table" "v_ocr_sieve_efficiency_daily" {
+  count               = var.enable_extraction_cost_model ? 1 : 0
   project             = var.project_id
   dataset_id          = data.google_bigquery_dataset.analytics.dataset_id
   table_id            = "v_ocr_sieve_efficiency_daily"

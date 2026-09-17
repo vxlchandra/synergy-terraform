@@ -49,6 +49,28 @@ variable "enable_classifier_retrain" {
     2. the validation gate is ON and checks ITEM accuracy, not only section;
     3. artifact versioning is ON so a bad head can be rolled back;
     4. promotion is validated against a held-out set before hot-reload.
+
+  Added on review before phase-b-infra merged (not yet addressed — this job
+  runs as the highly-privileged classifier SA rather than a scheduler-only
+  identity, and none of these have app-side support yet):
+    5. a dedicated scheduler-only SA invokes the endpoint, not the classifier
+       runtime SA itself — the retrain trigger should not carry the same
+       privileges as the service being retrained;
+    6. classifier_internal_secret is a Terraform `sensitive` string — that
+       only redacts CLI/plan OUTPUT, it still lands in Terraform state and in
+       this Scheduler job's stored HTTP headers in GCP. Do not treat
+       `sensitive = true` as equivalent to "not persisted anywhere";
+    7. an empty classifier_internal_secret (today's default) must be rejected
+       at apply time or by the endpoint, not silently create a permanently-
+       failing job;
+    8. the retrain is a non-idempotent model overwrite + hot-reload. Cloud
+       Scheduler's own retry can duplicate a delivery; an idempotency key
+       (e.g. derived from the schedule's own timestamp) or a distributed lock
+       is required before retry_count can safely be > 0 with this side effect;
+    9. attempt_deadline should be set to at least the verified worst-case
+       retrain runtime once one is measured — currently unset (defaults to
+       this job's own 180s HTTP target default, likely too short for a real
+       refit + hot-reload).
   EOT
   type        = bool
   default     = false
@@ -99,5 +121,6 @@ resource "google_cloud_scheduler_job" "classifier_retrain_head" {
   depends_on = [
     google_cloud_run_v2_service.classifier,
     google_cloud_run_v2_service_iam_member.classifier_retrain_invoker,
+    google_project_service.required_apis["cloudscheduler.googleapis.com"],
   ]
 }

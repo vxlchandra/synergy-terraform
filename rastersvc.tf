@@ -2,9 +2,12 @@
 # rastersvc.tf — page rasterization service for document viewer v1 (Spec E)
 # =============================================================================
 #
-# AUTHORED, NOT APPLIED. `enable_rastersvc` defaults to false, so a plan/apply
-# against existing state is a no-op until an operator opts in. Same posture as
-# graphsvc.tf, which this file mirrors.
+# LIVE. `enable_rastersvc` defaults to TRUE (applied 2026-07-31 alongside the
+# graphsvc default fix — same class of "clean checkout plans a destroy"
+# trap). A plan from a clean checkout is a no-op today. Same posture as
+# graphsvc.tf, which this file mirrors. (Corrected in review: this comment
+# previously said "AUTHORED, NOT APPLIED" / "defaults to false", stale since
+# the enable_rastersvc flip elsewhere in this branch's history.)
 #
 # WHY A SEPARATE SERVICE. The classifier runs at concurrency 5 and is already
 # the platform's throughput bottleneck. Rasterizing a 400-page manual inside
@@ -35,18 +38,39 @@ resource "google_service_account" "rastersvc" {
 # cannot delete cannot destroy a customer's source document, whatever a bug or
 # a crafted object path asks it to do. Rendered pages are expired by a bucket
 # lifecycle rule, not by this service.
-resource "google_project_iam_member" "rastersvc_storage_viewer" {
-  count   = var.enable_rastersvc ? 1 : 0
-  project = var.project_id
-  role    = "roles/storage.objectViewer"
-  member  = "serviceAccount:${google_service_account.rastersvc[0].email}"
+#
+# Scoped to the two buckets that actually hold customer documents (documents,
+# uploads) — NOT `google_project_iam_member`, which the classifier's own grant
+# uses but which also covers the classifier's model-artifact bucket and any
+# future project buckets. This is a strict subset of what rastersvc already
+# had (every bucket in the project), so it cannot remove access this LIVE
+# service depends on today.
+resource "google_storage_bucket_iam_member" "rastersvc_documents_viewer" {
+  count  = var.enable_rastersvc ? 1 : 0
+  bucket = google_storage_bucket.documents.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.rastersvc[0].email}"
 }
 
-resource "google_project_iam_member" "rastersvc_storage_creator" {
-  count   = var.enable_rastersvc ? 1 : 0
-  project = var.project_id
-  role    = "roles/storage.objectCreator"
-  member  = "serviceAccount:${google_service_account.rastersvc[0].email}"
+resource "google_storage_bucket_iam_member" "rastersvc_documents_creator" {
+  count  = var.enable_rastersvc ? 1 : 0
+  bucket = google_storage_bucket.documents.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.rastersvc[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "rastersvc_uploads_viewer" {
+  count  = var.enable_rastersvc ? 1 : 0
+  bucket = google_storage_bucket.uploads.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.rastersvc[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "rastersvc_uploads_creator" {
+  count  = var.enable_rastersvc ? 1 : 0
+  bucket = google_storage_bucket.uploads.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.rastersvc[0].email}"
 }
 
 resource "google_project_iam_member" "rastersvc_logging" {

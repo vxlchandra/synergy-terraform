@@ -2,10 +2,24 @@
 # codified here). Gated on `enable_classifier`.
 
 # ---------------------------------------------------------------------------
-# Trained-head model artifact bucket — LEAST PRIVILEGE.
+# Trained-head model artifact bucket.
 # The head is derived vectors + labels (governance-safe, no raw content) but a
 # proprietary artifact: dedicated bucket, uniform access, public-access-prevention
-# enforced, read granted ONLY to the classifier runtime SA (+ project admins).
+# enforced. This file grants only `roles/storage.objectViewer` (read) on the
+# bucket to the classifier runtime SA.
+#
+# NOT actually isolated, though: main.tf's PRE-EXISTING `classifier_storage_creator`
+# grant is `roles/storage.objectCreator` at PROJECT scope (main.tf, ~line 304),
+# which already covers every bucket in the project including this one — so the
+# classifier SA can create objects here regardless of what this file grants.
+# That project-wide grant predates this file and is out of scope for this PR
+# to narrow (would touch main.tf's existing classifier wiring); flagging the
+# gap explicitly rather than letting "LEAST PRIVILEGE" / "ONLY" above overstate
+# what's actually enforced. objectCreator also cannot overwrite an existing
+# object (create only) — the retrain workflow (classifier_retrain_scheduler.tf,
+# disabled by default) needs create+delete to replace HEAD_PATH, which neither
+# this bucket-scoped grant nor the project-wide objectCreator provides today;
+# that gap must be closed before enable_classifier_retrain is ever flipped on.
 # HEAD_PATH = gs://<this bucket>/trained_head_full.pkl
 # ---------------------------------------------------------------------------
 variable "classifier_models_bucket_name" {
