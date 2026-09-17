@@ -48,21 +48,20 @@ resource "google_project_iam_member" "graphsvc_logging" {
   member  = "serviceAccount:${google_service_account.graphsvc[0].email}"
 }
 
-# STAGED MIGRATION — do not collapse to one grant. graphsvc's Cloud Run
-# `template` block below has `lifecycle.ignore_changes = all`, so the LIVE
-# revision keeps using whatever secret it was deployed with
-# (aeromon-db-password, the shared owner credential) until an operator
-# manually runs `gcloud run services update` to point it at the new
-# dedicated secret — Terraform applying this file alone does NOT rotate the
-# live env vars. Revoking the old grant in the same change that adds the new
-# one would 403 the live service's next cold start before the manual cutover
-# ever happens (caught on review before merge). Sequence:
-#   1. apply this file (creates the new user/secret, grants BOTH secrets);
-#   2. run the manual GRANT documented in cloudsql.tf;
-#   3. `gcloud run services update` to point graphsvc's live env at the new
-#      secret/user, verify a healthy cold start;
-#   4. THEN remove this old-secret grant in a follow-up change.
-resource "google_secret_manager_secret_iam_member" "graphsvc_db_password_legacy" {
+# STAGED MIGRATION — this address (`graphsvc_db_password`) is UNCHANGED from
+# what's already applied and in state: same secret_id, same role, same
+# member. Deliberately left untouched rather than repointed to the new
+# secret in place — Codex review caught that repointing it would force a
+# replace (destroy the existing binding, create a new one), and since a
+# second resource below grants the identical member on the identical
+# secret, an unlucky apply order could run this resource's destroy before
+# the other's create, opening a real window with NO grant on
+# aeromon-db-password — exactly what graphsvc's live cold start still reads
+# via secret_key_ref (its Cloud Run template has `ignore_changes = all`, so
+# it keeps using this secret until an operator manually cuts it over; see
+# below). Keeping this resource's config identical to state means Terraform
+# plans zero changes for it — no replace, no window.
+resource "google_secret_manager_secret_iam_member" "graphsvc_db_password" {
   count     = var.enable_graphsvc ? 1 : 0
   project   = var.project_id
   secret_id = google_secret_manager_secret.secrets["aeromon-db-password"].secret_id
@@ -70,14 +69,23 @@ resource "google_secret_manager_secret_iam_member" "graphsvc_db_password_legacy"
   member    = "serviceAccount:${google_service_account.graphsvc[0].email}"
 }
 
-# graphsvc's OWN read-only DB password secret (cloudsql.tf), not the shared
-# owner-credential secret the classifier/springboot use. graphsvc only ever
-# reads the `extractions` table to rebuild its derived graph; giving it the
-# owner credential would hand full DB privileges to whatever compromises
-# this service. See cloudsql.tf's graphsvc_reader block for the one-time
-# manual GRANT this depends on, and the staged-migration note above for why
-# the legacy grant above stays until the live service is manually cut over.
-resource "google_secret_manager_secret_iam_member" "graphsvc_db_password" {
+# graphsvc's OWN read-only DB password secret (cloudsql.tf), a NEW resource
+# address — purely additive (CREATE only, nothing to replace) — granting
+# access to the new dedicated secret alongside the untouched grant above.
+# graphsvc only ever reads the `extractions` table to rebuild its derived
+# graph; giving it the owner credential (what the grant above still does,
+# for now) would hand full DB privileges to whatever compromises this
+# service. See cloudsql.tf's graphsvc_reader block for the one-time manual
+# GRANT this depends on. Cutover sequence once this is applied:
+#   1. apply this file (creates the new user/secret, grants BOTH secrets —
+#      the untouched grant above plus this one);
+#   2. run the manual GRANT documented in cloudsql.tf;
+#   3. `gcloud run services update` to point graphsvc's live env at the new
+#      secret/user, verify a healthy cold start;
+#   4. THEN remove the grant above (graphsvc_db_password) in a follow-up
+#      change — at that point it becomes the one being retired, so the same
+#      destroy-ordering risk no longer applies to a still-in-use secret.
+resource "google_secret_manager_secret_iam_member" "graphsvc_db_password_dedicated" {
   count     = var.enable_graphsvc ? 1 : 0
   project   = var.project_id
   secret_id = google_secret_manager_secret.graphsvc_db_password.secret_id
