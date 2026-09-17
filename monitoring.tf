@@ -230,6 +230,8 @@ resource "google_monitoring_alert_policy" "ingestion_canary_missing_ack" {
       "ingestionCanaryCron writes a fresh activation every 15 minutes; onIngestionActivated should acknowledge it immediately. No acknowledgement for ${var.alert_ingestion_canary_absence_window_seconds}s means the trigger has stopped firing — the exact failure mode of the 2026-08-22 to 09-01 incident, which produced zero error logs.",
       "",
       "First check: `gcloud functions logs read onIngestionActivated --project=${var.project_id}` (or Cloud Run revision logs, resource.type=cloud_run_revision, service_name=oningestionactivated — NOT resource.type=cloud_function, see trap 7 in this repo's memory).",
+      "",
+      "**Operational caveat (found by Codex review, not fixable in HCL alone):** `MetricAbsence` only opens once the underlying time series has received at least one point. If onIngestionActivated is ALREADY broken at the moment this policy is first applied, the ack metric never gets its first data point and this condition never fires — silence at deploy time is not proof of health. After applying, manually confirm at least one real acknowledgement lands (wait ~15-20 min, then check the syn1802_ingestion_canary_ack metric or this policy's own incident history) before trusting this alert as a live safety net.",
     ])
     mime_type = "text/markdown"
   }
@@ -258,15 +260,33 @@ resource "google_monitoring_alert_policy" "ingestion_delivery_divergence" {
     display_name = "active_ingestions writes sustained ahead of onIngestionActivated invocations"
 
     condition_monitoring_query_language {
+      # Rewritten after dual review (Codex CLI + an independent adversarial
+      # Claude pass) found the original query invalid on three counts, all
+      # fixed here:
+      #   1. `fetch cloud_run_revision` alone selects no metric — MQL needs
+      #      `fetch <resource> :: <metric type>` (double colon).
+      #   2. The two metrics carry different `resource.labels.service_name`
+      #      values (writes come from 5+ different functions; invocations
+      #      come only from oningestionactivated), so a plain `join` on their
+      #      raw label sets never matches — and an INNER join silently drops
+      #      the exact case this alert exists to catch (a real delivery gap,
+      #      where the invocation side has NO points at all). `group_by []`
+      #      collapses both sides to one series before joining; `outer_join 0`
+      #      keeps a writes-only point instead of discarding it.
+      #   3. `gap_ratio.gap_ratio` is not valid MQL field access — `value`
+      #      already reduces to one output column, referenced via `val()`.
       query = join("\n", [
-        "fetch cloud_run_revision",
-        "| { metric 'logging.googleapis.com/user/${google_logging_metric.active_ingestion_writes[0].name}'",
-        "  ; metric 'logging.googleapis.com/user/${google_logging_metric.ingestion_activation_invocations[0].name}' }",
-        "| align rate(${var.alert_ingestion_divergence_window_seconds}s)",
-        "| every ${var.alert_ingestion_divergence_window_seconds}s",
-        "| join",
-        "| value [writes: val(0), invocations: val(1), gap_ratio: (val(0) - val(1)) / val(0)]",
-        "| condition gap_ratio.gap_ratio > ${var.alert_ingestion_divergence_ratio_threshold} '1'",
+        "{ fetch cloud_run_revision :: logging.googleapis.com/user/${google_logging_metric.active_ingestion_writes[0].name}",
+        "    | align rate(${var.alert_ingestion_divergence_window_seconds}s)",
+        "    | group_by [], [writes: sum(val())]",
+        "; fetch cloud_run_revision :: logging.googleapis.com/user/${google_logging_metric.ingestion_activation_invocations[0].name}",
+        "    | align rate(${var.alert_ingestion_divergence_window_seconds}s)",
+        "    | group_by [], [invocations: sum(val())]",
+        "}",
+        "| outer_join 0",
+        "| filter writes > 0", # avoid division by zero when nothing has written yet
+        "| value (writes - invocations) / writes",
+        "| condition val() > ${var.alert_ingestion_divergence_ratio_threshold} '1'",
       ])
       duration = "${var.alert_ingestion_divergence_window_seconds}s"
     }
