@@ -2,17 +2,23 @@
 # officesvc.tf — Office/email → PDF conversion for the document viewer
 # =============================================================================
 #
-# AUTHORED, NOT APPLIED. `enable_officesvc` defaults to FALSE, so a plan against
-# existing state is a no-op until an operator opts in — and until the image
-# actually exists in Artifact Registry, since a service pointed at a missing
-# image fails to start.
+# LIVE. `enable_officesvc` defaults to TRUE (corrected 2026-09-17 — see
+# variables.tf). This file previously said "AUTHORED, NOT APPLIED" with the
+# default at false, which was itself an instance of the exact trap the next
+# paragraph warns about: `terraform state list` proves this service, its SA,
+# and its IAM bindings are all already live, and the first real
+# `terraform plan` run against actual state (this one, after graphsvc/
+# rastersvc's identical drift was already fixed but before anyone checked
+# officesvc against live state directly) proposed destroying all five.
+# prevent_destroy below is why that surfaced as a hard error instead of
+# silently happening on the next apply.
 #
-# WHEN YOU APPLY THIS, FLIP THE DEFAULT TO TRUE IN THE SAME CHANGE.
 # `terraform.tfvars` is gitignored. A resource applied while its enable flag
 # defaults to false is a resource that a clean checkout plans to DESTROY. That
 # is not hypothetical: on 2026-07-31 a plan from a clean checkout proposed
-# destroying the LIVE graphsvc service and its SA for exactly this reason.
-# `enable_rastersvc` says "TRUE because it is applied" for the same reason.
+# destroying the LIVE graphsvc service and its SA for exactly this reason —
+# and, it turns out, this file made the identical mistake right after
+# documenting it.
 #
 # WHY A SEPARATE SERVICE FROM rastersvc. LibreOffice is ~450MB and slow to
 # start. Rendering is lazy, so the FIRST viewer open pays the cold start;
