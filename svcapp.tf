@@ -97,6 +97,17 @@ resource "google_cloud_run_v2_service" "svcapp" {
   location = var.region
   project  = var.project_id
 
+  # The template references two secrets, but referencing a secret does not imply
+  # the runtime SA may READ it. Without this, Terraform is free to create the
+  # service before the accessor bindings exist, the first revision cannot mount
+  # either secret, and the apply fails on a service that is already half-created.
+  # Only an ordering constraint — no new resources, no IAM change.
+  depends_on = [
+    google_secret_manager_secret_iam_member.svcapp_db_password,
+    google_secret_manager_secret_iam_member.svcapp_internal_api_secret,
+    google_secret_manager_secret_version.svcapp_db_password,
+  ]
+
   lifecycle {
     # Terraform owns the service's EXISTENCE, identity and who may invoke it;
     # the deploy (docker buildx build --push + `gcloud run services update`)
