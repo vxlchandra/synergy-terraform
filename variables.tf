@@ -548,6 +548,86 @@ variable "officesvc_convert_timeout" {
   default     = 180
 }
 
+# ─── Cloud Run — svcapp (hybrid search, POST /search) ─────────────────────
+variable "enable_svcapp" {
+  description = <<-EOT
+  Create the svcapp Cloud Run service + its SA/IAM/DB login.
+
+  FALSE, and correctly so — NOTHING in svcapp.tf exists in GCP yet, so a
+  clean-checkout plan is a no-op rather than a proposed destroy. This is the
+  one state in which a false default is safe.
+
+  WHEN YOU ENABLE IT, flip this default to true in the SAME change. Do not
+  apply with `-var enable_svcapp=true` and leave the default here at false:
+  terraform.tfvars is gitignored, so the next clean-checkout plan would then
+  propose DESTROYING the live service — the exact trap that hit graphsvc,
+  rastersvc and officesvc (see the header of officesvc.tf).
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "svcapp_service_name" {
+  description = "Cloud Run service name for the hybrid-search (FastAPI) service"
+  type        = string
+  default     = "aeromontek-svcapp"
+}
+
+variable "svcapp_image" {
+  description = "Docker image for svcapp. Built from classifier/Dockerfile.svcapp (FastAPI + baked local embedder/reranker + pg8000/pgvector)."
+  type        = string
+  default     = "us-docker.pkg.dev/zsynergy/zsynergy/aeromontek-svcapp:latest"
+}
+
+variable "svcapp_cpu" {
+  description = "CPU limit for svcapp. The cross-encoder rerank is the CPU-bound step; below 2 a reranked search gets materially slower."
+  type        = string
+  default     = "2"
+}
+
+variable "svcapp_memory" {
+  description = "Memory limit in Gi. Holds torch + the embedder + the cross-encoder resident per instance; 4 is the floor that has headroom over the two model loads."
+  type        = number
+  default     = 4
+}
+
+variable "svcapp_concurrency" {
+  description = "Max concurrent requests per instance. Also injected as DB_POOL_SIZE so in-flight searches can never exceed the pooled pg8000 connections to the shared Cloud SQL instance."
+  type        = number
+  default     = 4
+}
+
+variable "svcapp_min_instances" {
+  description = "Minimum instances (0 = scale-to-zero). Scale-to-zero means the first search after idle pays the model load; raise to 1 if that latency is felt in the UI."
+  type        = number
+  default     = 0
+}
+
+variable "svcapp_max_instances" {
+  description = "Maximum instances for svcapp. Bounded deliberately: each instance holds its own DB pool against the shared Cloud SQL instance."
+  type        = number
+  default     = 5
+}
+
+variable "svcapp_max_top_k" {
+  description = "Upper bound for a search request's top_k (svcapp 400s anything outside [1, this]). Mirrors SEARCH_MAX_TOP_K's default in src/svcapp/app.py."
+  type        = number
+  default     = 100
+}
+
+variable "svcapp_internal_secret_name" {
+  description = <<-EOT
+  Secret Manager secret holding the shared internal-auth value (INTERNAL_API_SECRET).
+
+  READ, not created — it is absent from var.secret_names, so this repo does not
+  manage it. It MUST be the same secret aeromontek-api reads, or every search
+  401s: both the live API and the live classifier read
+  `aeromon-internal-api-secret` today.
+  EOT
+  type        = string
+  default     = "aeromon-internal-api-secret"
+}
+
 # ─── CORS (Centralized — shared by Spring Boot API + Classifier) ────────
 variable "cors_allowed_origins" {
   description = "Comma-separated CORS origins. Passed to both Cloud Run services via env var."
