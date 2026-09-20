@@ -166,3 +166,64 @@ resource "google_sql_user" "graphsvc_reader" {
     ignore_changes = [password]
   }
 }
+
+# -----------------------------------------------------------------------------
+# svcapp read-only DB login (svcapp.tf) — same least-privilege pattern as
+# graphsvc_reader above. svcapp serves POST /search and only ever SELECTs from
+# doc_chunks (dense pgvector + lexical BM25, both filtered by tenant AND
+# project). A dedicated login means a compromised search service reads one
+# table, not the owner's full read/write/DDL on the whole database — and the
+# service's own write paths (/ingest, /classify's index sink) fail closed
+# against the database rather than relying on the auth gate alone.
+#
+# EVERYTHING HERE IS GATED on enable_svcapp (false today) so a plan from a clean
+# checkout proposes nothing at all — not even an unused secret.
+# -----------------------------------------------------------------------------
+resource "random_password" "svcapp_db_password" {
+  count   = var.enable_svcapp ? 1 : 0
+  length  = 32
+  special = true
+}
+
+resource "google_secret_manager_secret" "svcapp_db_password" {
+  count     = var.enable_svcapp ? 1 : 0
+  secret_id = "aeromon-svcapp-db-password"
+  project   = var.project_id
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+}
+
+resource "google_secret_manager_secret_version" "svcapp_db_password" {
+  count       = var.enable_svcapp ? 1 : 0
+  secret      = google_secret_manager_secret.svcapp_db_password[0].id
+  secret_data = random_password.svcapp_db_password[0].result
+}
+
+# As with graphsvc_reader: this creates the LOGIN only. The google provider has
+# no Postgres GRANT resource and this repo carries no postgresql provider, so
+# after the first apply run ONCE against the shared instance as the zsynergy
+# owner:
+#
+#   GRANT CONNECT ON DATABASE <var.cloud_sql_database> TO svcapp_reader;
+#   GRANT USAGE ON SCHEMA public TO svcapp_reader;
+#   GRANT SELECT ON doc_chunks TO svcapp_reader;
+#
+# Until that GRANT runs, svcapp_reader can log in but reads nothing: /search
+# returns an error, it does not quietly return zero hits. Fails closed.
+resource "google_sql_user" "svcapp_reader" {
+  count    = var.enable_svcapp ? 1 : 0
+  name     = "svcapp_reader"
+  instance = google_sql_database_instance.postgres.name
+  password = random_password.svcapp_db_password[0].result
+  project  = var.project_id
+
+  lifecycle {
+    ignore_changes = [password]
+  }
+}
