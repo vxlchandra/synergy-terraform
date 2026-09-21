@@ -13,37 +13,97 @@
 # time. testConnection() never touches Secret Manager at all (it only probes
 # reachability), which is exactly why test succeeds and save doesn't.
 #
-# FIX: a custom, least-privilege role — not the built-in roles/secretmanager
-# .admin, which would hand the Spring Boot service control over EVERY secret
-# in the project (including the DB passwords other services depend on, e.g.
-# aeromon-db-password). Scoped to exactly the four permissions
-# GcpSftpSecretResolver actually calls: create (new secret container per
-# account), delete (rollback on partial failure + account deletion), and
-# addVersion/access (write/read the credential payload). Mirrors this
-# project's existing graphsvc_reader/graphsvc_kb_writer least-privilege
-# pattern (cloudsql.tf) applied to Secret Manager instead of Cloud SQL.
+# FIX: two custom, least-privilege roles instead of one, because their two
+# permission groups have different scoping ceilings:
 #
-# Granted at the PROJECT level (not per-secret, unlike the two existing
-# grants above) because SFTP secrets are created dynamically — one per
-# (userId, accountId) pair, an unbounded set — so there is no fixed secret
-# resource to scope a per-secret IAM binding to before it exists.
+#   1. sftp_secret_manager_create — secretmanager.secrets.create ONLY.
+#      Left PROJECT-scoped with no resource condition. This is not a missed
+#      opportunity: secrets.create is authorized against the PARENT
+#      (the project) because the secret named in the request doesn't exist
+#      yet at authorization-check time, so a condition referencing the
+#      not-yet-existing secret's resource.name has nothing real to match
+#      against. Checked empirically before accepting this: adding a
+#      `resource.name.startsWith(...)` condition to a create-only binding
+#      passed `terraform validate`/`terraform plan` without error — but that
+#      only proves Terraform's client-side schema accepts the HCL shape, not
+#      that Secret Manager's server-side policy evaluator would ever honor
+#      it. That only resolves at `setIamPolicy` (apply) time, which this fix
+#      does not perform. Rather than ship a condition that either silently
+#      no-ops (false sense of scoping) or is rejected at apply, this stays
+#      honestly project-scoped for `create` alone — one permission, nothing
+#      else, matching the actual GCP constraint on creation-time conditions.
+#
+#   2. sftp_secret_manager_manage — secretmanager.secrets.delete,
+#      secretmanager.versions.add, secretmanager.versions.access. These act
+#      on secrets that already exist, so they CAN and DO carry a resource
+#      condition restricting them to the `sftp-` name prefix (see
+#      GcpSftpSecretResolver.secretId(userId, accountId) in aeromontek-api:
+#      `"sftp-" + sanitizedUserId + "-" + accountId`) — confirmed as a
+#      supported pattern by Secret Manager's own docs ("allow a user to
+#      manage secret versions only on secrets that begin with a specific
+#      prefix", cloud.google.com/secret-manager/docs/access-control).
+#
+# Prior version of this file bound all four permissions — including delete,
+# version-add, and version-access — in a single project-scoped role with no
+# condition. That let the Spring Boot SA read/overwrite/delete every secret
+# in the project (aeromon-db-password, aeromon-internal-api-secret,
+# aeromon-oauth-state-secret, etc.), not just SFTP ones, despite this file's
+# earlier comment claiming it "avoids roles/secretmanager.admin's reach" —
+# false for exactly those three capabilities, which are present in both.
+# This version is honest about what's actually scoped: `create` remains
+# project-wide only because GCP's own IAM-conditions model doesn't support
+# scoping it any tighter (not a choice this file is making); `delete` /
+# `versions.add` / `versions.access` are both permission-minimal AND
+# resource-minimal, restricted to the `sftp-*` secret family.
+#
+# Mirrors this project's existing graphsvc_reader least-privilege pattern
+# (cloudsql.tf) — a dedicated, narrowly-scoped principal per integration
+# rather than reusing a broad built-in role — applied here to Secret Manager
+# instead of Cloud SQL. (graphsvc_kb_writer, previously also cited here, does
+# not exist in this branch/PR's base — it lives only on the separate,
+# unmerged feat/ontology-graph-admin branch. Removed the reference rather
+# than cite a sibling resource that isn't actually part of this codebase.)
 
-resource "google_project_iam_custom_role" "sftp_secret_manager" {
-  role_id     = "sftpSecretManager"
-  title       = "SFTP Secret Manager (create/delete/version)"
-  description = "Least-privilege role for creating and managing per-account SFTP credential secrets — scoped to exactly what GcpSftpSecretResolver calls, nothing else in Secret Manager."
+resource "google_project_iam_custom_role" "sftp_secret_manager_create" {
+  count       = var.enable_springboot ? 1 : 0
+  role_id     = "sftpSecretManagerCreate"
+  title       = "SFTP Secret Manager (create)"
+  description = "Least-privilege role for creating new per-account SFTP credential secrets. Project-scoped: secrets.create is authorized against the parent project, not an existing resource, so it cannot be further restricted by an IAM condition (see file header)."
   project     = var.project_id
   permissions = [
     "secretmanager.secrets.create",
+  ]
+}
+
+resource "google_project_iam_member" "springboot_sftp_secret_manager_create" {
+  count   = var.enable_springboot ? 1 : 0
+  project = var.project_id
+  role    = google_project_iam_custom_role.sftp_secret_manager_create[0].id
+  member  = "serviceAccount:${google_service_account.springboot[0].email}"
+}
+
+resource "google_project_iam_custom_role" "sftp_secret_manager_manage" {
+  count       = var.enable_springboot ? 1 : 0
+  role_id     = "sftpSecretManagerManage"
+  title       = "SFTP Secret Manager (delete/version)"
+  description = "Least-privilege role for deleting and adding/accessing versions of per-account SFTP credential secrets — resource-scoped to the sftp- secret family via an IAM condition, not just permission-minimal."
+  project     = var.project_id
+  permissions = [
     "secretmanager.secrets.delete",
     "secretmanager.versions.add",
     "secretmanager.versions.access",
   ]
 }
 
-resource "google_project_iam_member" "springboot_sftp_secret_manager" {
+resource "google_project_iam_member" "springboot_sftp_secret_manager_manage" {
   count   = var.enable_springboot ? 1 : 0
   project = var.project_id
-  role    = google_project_iam_custom_role.sftp_secret_manager.id
+  role    = google_project_iam_custom_role.sftp_secret_manager_manage[0].id
   member  = "serviceAccount:${google_service_account.springboot[0].email}"
+
+  condition {
+    title       = "sftp-secrets-only"
+    description = "Restricts delete/versions.add/versions.access to secrets named sftp-<userId>-<accountId> (GcpSftpSecretResolver.secretId) — not every secret in the project."
+    expression  = "resource.name.startsWith(\"projects/${data.google_project.project.number}/secrets/sftp-\")"
+  }
 }
