@@ -166,3 +166,63 @@ resource "google_sql_user" "graphsvc_reader" {
     ignore_changes = [password]
   }
 }
+
+# -----------------------------------------------------------------------------
+# graphsvc KB-ontology write login — SEPARATE from graphsvc_reader above.
+# graphsvc_reader is read-only on `extractions` (the traceability-graph source)
+# and must not be reused here: this login owns the two new durable tables that
+# back admin create/update of the KB ontology graph (aviation_records_kg),
+# added so those edits survive graphsvc's scale-to-zero cold starts instead of
+# living only in the container-local, ephemeral Postgres+AGE (see graphsvc.tf's
+# architecture note). Same "dedicated least-privilege login, not the instance
+# owner" pattern as graphsvc_reader — a compromised graphsvc gets read/write on
+# two small tables, not the owner's full database privileges.
+# -----------------------------------------------------------------------------
+resource "random_password" "graphsvc_kb_writer_db_password" {
+  length  = 32
+  special = true
+}
+
+resource "google_secret_manager_secret" "graphsvc_kb_writer_db_password" {
+  secret_id = "aeromon-graphsvc-kb-writer-db-password"
+  project   = var.project_id
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+}
+
+resource "google_secret_manager_secret_version" "graphsvc_kb_writer_db_password" {
+  secret      = google_secret_manager_secret.graphsvc_kb_writer_db_password.id
+  secret_data = random_password.graphsvc_kb_writer_db_password.result
+}
+
+# google_sql_user only creates the login; table-level privileges still need a
+# manual GRANT (same limitation as graphsvc_reader above — no postgresql
+# provider in this repo). Apply the schema in
+# terraform/sql/kb_ontology_schema.sql FIRST, then run once as the zsynergy
+# owner:
+#
+#   GRANT CONNECT ON DATABASE <var.cloud_sql_database> TO graphsvc_kb_writer;
+#   GRANT USAGE ON SCHEMA public TO graphsvc_kb_writer;
+#   GRANT SELECT, INSERT, UPDATE, DELETE ON kb_ontology_nodes, kb_ontology_edges
+#     TO graphsvc_kb_writer;
+#   GRANT USAGE, SELECT ON SEQUENCE kb_ontology_edges_id_seq TO graphsvc_kb_writer;
+#
+# Until that GRANT runs, graphsvc_kb_writer can log in but every KB write
+# fails with a permissions error — fails closed, not open.
+resource "google_sql_user" "graphsvc_kb_writer" {
+  count    = var.enable_graphsvc ? 1 : 0
+  name     = "graphsvc_kb_writer"
+  instance = google_sql_database_instance.postgres.name
+  password = random_password.graphsvc_kb_writer_db_password.result
+  project  = var.project_id
+
+  lifecycle {
+    ignore_changes = [password]
+  }
+}
