@@ -63,6 +63,22 @@
 # not exist in this branch/PR's base — it lives only on the separate,
 # unmerged feat/ontology-graph-admin branch. Removed the reference rather
 # than cite a sibling resource that isn't actually part of this codebase.)
+#
+# CORRECTED (re-review): the Spring Boot SA does NOT arrive at this PR with
+# zero Secret Manager access, as an earlier version of this comment claimed.
+# `gcloud projects get-iam-policy zsynergy` shows it already holds a
+# project-wide, UNCONDITIONED `roles/secretmanager.secretAccessor`
+# (== secretmanager.versions.access) — undeclared drift, not present anywhere
+# in this Terraform config, shared with three other service accounts. IAM is
+# additive: that pre-existing grant makes `sftp_secret_manager_manage`'s own
+# `versions.access` permission redundant today (the SA can already read every
+# secret version in the project regardless of what this PR adds), so the
+# "permission-minimal AND resource-minimal" claim two paragraphs up is only
+# fully true for `secrets.delete` and `versions.add`. Keeping `versions.access`
+# in this role anyway is still correct: it makes the role self-describing and
+# it becomes load-bearing (not merely redundant) the day someone cleans up the
+# out-of-band grant. That cleanup is real platform work but is explicitly OUT
+# OF SCOPE for this PR — tracked as a follow-up, not fixed here.
 
 resource "google_project_iam_custom_role" "sftp_secret_manager_create" {
   count       = var.enable_springboot ? 1 : 0
