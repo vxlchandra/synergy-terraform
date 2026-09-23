@@ -46,7 +46,7 @@
 # traffic.
 
 resource "google_cloud_run_v2_service" "frontend" {
-  count    = var.enable_frontend_cloudrun ? 1 : 0
+  count    = var.enable_frontend && var.enable_frontend_cloudrun ? 1 : 0
   name     = var.frontend_service_name
   location = var.region
   project  = var.project_id
@@ -80,12 +80,15 @@ resource "google_cloud_run_v2_service" "frontend" {
         }
       }
 
-      # Minimal bootstrap set — enough for the container to start and pass
-      # its health check. The real ~38-variable apphosting.yaml-equivalent
-      # config (Firebase public config, API endpoint paths, BACKEND_API_URL
-      # secret, etc.) is applied by the frontend-deploy step's
-      # --update-env-vars/--update-secrets, which is NOT reverted by the
-      # ignore_changes = all above.
+      # Minimal bootstrap set for the very first `terraform apply`, before
+      # any real deploy has run. What actually makes the container start
+      # and pass Cloud Run's startup probe is the Dockerfile's own
+      # ENV PORT=8080 / HOSTNAME=0.0.0.0 plus the Next.js standalone server
+      # binding to that port — independent of these two vars. The real
+      # ~38-variable apphosting.yaml-equivalent config (Firebase public
+      # config, API endpoint paths, BACKEND_API_URL secret, etc.) is applied
+      # by the frontend-deploy step's --update-env-vars/--update-secrets,
+      # which is NOT reverted by the ignore_changes = all above.
       env {
         name  = "NODE_ENV"
         value = "production"
@@ -133,12 +136,34 @@ resource "google_cloud_run_v2_service" "frontend" {
 # `public_invokes_springboot` documents in main.tf for the equivalent
 # App-Hosting-can't-issue-OIDC situation.
 resource "google_cloud_run_v2_service_iam_member" "public_invokes_frontend" {
-  count    = var.enable_frontend_cloudrun ? 1 : 0
+  count    = var.enable_frontend && var.enable_frontend_cloudrun ? 1 : 0
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.frontend[0].name
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+# --- Secret Manager IAM ------------------------------------------------------
+# Adversarial review caught a real gap: without this grant, the gcp-builds
+# frontend-deploy step's `--update-secrets=BACKEND_API_URL=aeromon-backend-
+# api-url:latest` would be rejected by Cloud Run at the secret-mount
+# permission check on every deploy. Referenced by literal secret_id, NOT
+# via google_secret_manager_secret.secrets[...] -- that map is built from
+# var.secret_names, and this specific secret is deliberately NOT in it: it
+# is created out-of-band, imperatively, by cloudbuild.yaml's deploy-
+# springboot step (`gcloud secrets create aeromon-backend-api-url` on first
+# run). Referencing it as a Terraform-managed google_secret_manager_secret
+# resource here would make the next `terraform apply` try to CREATE a
+# secret that already exists in production. A plain literal secret_id
+# string avoids that entirely -- this grants access to the existing secret
+# without taking over its lifecycle.
+resource "google_secret_manager_secret_iam_member" "frontend_backend_api_url" {
+  count     = var.enable_frontend && var.enable_frontend_cloudrun ? 1 : 0
+  project   = var.project_id
+  secret_id = "aeromon-backend-api-url"
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.frontend[0].email}"
 }
 
 # --- Outputs -----------------------------------------------------------------
