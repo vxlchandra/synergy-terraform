@@ -44,3 +44,37 @@ resource "google_cloud_tasks_queue" "drive_file_transfers" {
     max_doublings = 4
   }
 }
+
+# Separate queue for discover-folder tasks, split off drive-file-transfers
+# 2026-09-24. A discover-folder task is one cheap Box/Drive metadata list
+# call; a process-file task streams actual file bytes. Sharing one queue
+# meant a massive folder's tree discovery competed with its own in-flight
+# downloads for the same rate_limits budget, so downloads could starve
+# remaining discovery -- the Transfer Center UI's file counts stalled behind
+# whatever was already downloading instead of the tree finishing enumeration
+# quickly. Split so each can be tuned against its own real cost: discovery
+# is metadata-only and can run closer to Box's published per-user rate limit
+# (1000 req/min ≈ 16.6/s, verified against developer.box.com 2026-09-24)
+# than the existing transfer queue's more conservative default.
+resource "google_cloud_tasks_queue" "drive_file_discovery" {
+  name     = "drive-file-discovery"
+  location = var.region
+  project  = var.project_id
+
+  depends_on = [google_project_service.required_apis["cloudtasks.googleapis.com"]]
+
+  rate_limits {
+    max_dispatches_per_second = var.discovery_queue_max_dispatches_per_second
+    max_concurrent_dispatches = var.discovery_queue_max_concurrent_dispatches
+  }
+
+  # Same reasoning as drive_file_transfers.retry_config above: must stay
+  # >= app.transfer.max-attempts so the app's own T24 retry/DLQ
+  # classification is always what terminates a task, never the queue.
+  retry_config {
+    max_attempts  = var.discovery_queue_max_attempts
+    min_backoff   = "10s"
+    max_backoff   = "300s"
+    max_doublings = 4
+  }
+}
