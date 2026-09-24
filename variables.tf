@@ -487,6 +487,54 @@ variable "enable_officesvc" {
   default     = false
 }
 
+variable "enable_frontend_cloudrun" {
+  description = "Create the frontend's Cloud Run service + its public-invoker binding. FALSE because it is authored but NOT YET APPLIED — flip to true in the SAME change that applies it, or a clean checkout plans to destroy it (see the note in frontend.tf). Deliberately separate from enable_frontend, which already gates the (already-live) frontend service account/IAM and must stay true regardless of this flag."
+  type        = bool
+  default     = false
+}
+
+variable "frontend_service_name" {
+  description = "Cloud Run service name for the aeromontek Next.js frontend"
+  type        = string
+  default     = "aeromontek-frontend"
+}
+
+variable "frontend_image" {
+  description = "Docker image for the frontend. Built from aeromontek/Dockerfile.cloudrun."
+  type        = string
+  default     = "us-docker.pkg.dev/zsynergy/zsynergy/aeromontek-frontend:latest"
+}
+
+variable "frontend_cpu" {
+  description = "CPU limit for the frontend Next.js SSR server"
+  type        = string
+  default     = "1"
+}
+
+variable "frontend_memory" {
+  description = "Memory limit in Gi for the frontend Next.js SSR server (serving, not build — unrelated to the build machine's memory)"
+  type        = number
+  default     = 1
+}
+
+variable "frontend_concurrency" {
+  description = "Max concurrent requests per frontend instance"
+  type        = number
+  default     = 40
+}
+
+variable "frontend_min_instances" {
+  description = "Minimum instances for the frontend (0 = scale-to-zero)"
+  type        = number
+  default     = 0
+}
+
+variable "frontend_max_instances" {
+  description = "Maximum instances for the frontend"
+  type        = number
+  default     = 10
+}
+
 variable "officesvc_service_name" {
   description = "Cloud Run service name for the document conversion service"
   type        = string
