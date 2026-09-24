@@ -839,3 +839,23 @@ variable "transfer_queue_max_attempts" {
   type        = number
   default     = 5
 }
+
+# ─── Cloud Tasks — drive-file-discovery queue (split from drive-file-transfers
+# 2026-09-24, cloudtasks.tf) ────────────────────────────────────────────────
+variable "discovery_queue_max_concurrent_dispatches" {
+  description = "Max simultaneously-running discover-folder tasks (= concurrent Box/Drive metadata-list connections). A discover-folder call is a single cheap metadata list, not a file transfer, so this can run closer to Box's real per-user rate limit than transfer_queue_max_concurrent_dispatches without risking Box or Cloud NAT the way a download-heavy queue would."
+  type        = number
+  default     = 15
+}
+
+variable "discovery_queue_max_dispatches_per_second" {
+  description = "Max dispatch rate for the drive-file-discovery queue. Box's published limit (developer.box.com, verified 2026-09-24) is 1000 requests/min per user (~16.6/s); kept a bit under that (15/s) for headroom shared with the small number of other Box calls (download permission checks, credential refresh) a job also makes."
+  type        = number
+  default     = 15
+}
+
+variable "discovery_queue_max_attempts" {
+  description = "Max delivery attempts for a drive-file-discovery task before Cloud Tasks gives up. MUST be >= the app's app.transfer.max-attempts (default 5) for the same reason as transfer_queue_max_attempts -- the app's own T24 retry/DLQ classification must always be the terminator, never the queue."
+  type        = number
+  default     = 5
+}
