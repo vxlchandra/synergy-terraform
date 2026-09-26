@@ -778,7 +778,7 @@ variable "reference_refresh_cron" {
 
 # ─── Cloud Tasks — drive-file-transfers queue (T27, cloudtasks.tf) ───────
 variable "transfer_queue_max_concurrent_dispatches" {
-  description = "Max simultaneously-running drive-file-transfers tasks (= concurrent Box connections from the transfer fan-out). Kept well under springboot_concurrency (40) x springboot_max_instances (10) = 400, and modest for Cloud NAT + Box API rate limits. Matches the live prod queue (20) to keep terraform zero-diff."
+  description = "Max simultaneously-running drive-file-transfers tasks (= concurrent Box connections from the transfer fan-out). Kept well under springboot_concurrency (10) x springboot_max_instances (10) = 100 (lowered from 40x10=400 as part of the 2026-09-26 OOM mitigation), and modest for Cloud NAT + Box API rate limits. Matches the live prod queue (20) to keep terraform zero-diff."
   type        = number
   default     = 20
 }
