@@ -44,3 +44,42 @@ resource "google_cloud_tasks_queue" "drive_file_transfers" {
     max_doublings = 4
   }
 }
+
+# Provisions the discovery-queue used by CloudTasksPublisher.java for
+# discover-folder tasks (a SEPARATE queue path from drive-file-transfers,
+# added by the discovery-queue-fairness work, PR #264).
+#
+# INCIDENT (2026-09-25): the original "drive-file-discovery" queue was
+# deleted at 19:14:52 UTC the same day (audit log: google.cloud.tasks.v2.
+# CloudTasks.DeleteQueue, principal chandra@vxlllc.com — almost certainly an
+# in-session gcloud action, not a deliberate deprovision), breaking every
+# Box/Drive folder import with NOT_FOUND. Cloud Tasks blocks recreating a
+# queue under the same name for ~7 days after deletion, so this resource
+# provisions "drive-file-discovery-v2" instead, and the app's
+# CLOUD_TASKS_DISCOVERY_QUEUE env var (app.cloud-tasks.discovery-queue,
+# CloudTasksPublisher.java) is set to match.
+# TODO: after 2026-10-03 (7-day cooldown clears), consider renaming back to
+# "drive-file-discovery" for consistency — not required, purely cosmetic.
+#
+# Name/location MUST match QueueName.of(projectId, location, <name>) as
+# resolved by app.cloud-tasks.discovery-queue in CloudTasksPublisher.java,
+# same location var as drive-file-transfers.
+resource "google_cloud_tasks_queue" "drive_file_discovery" {
+  name     = "drive-file-discovery-v2"
+  location = var.region
+  project  = var.project_id
+
+  depends_on = [google_project_service.required_apis["cloudtasks.googleapis.com"]]
+
+  rate_limits {
+    max_dispatches_per_second = var.discovery_queue_max_dispatches_per_second
+    max_concurrent_dispatches = var.discovery_queue_max_concurrent_dispatches
+  }
+
+  retry_config {
+    max_attempts  = var.discovery_queue_max_attempts
+    min_backoff   = "10s"
+    max_backoff   = "300s"
+    max_doublings = 4
+  }
+}

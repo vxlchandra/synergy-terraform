@@ -245,13 +245,13 @@ variable "springboot_cpu" {
 variable "springboot_memory" {
   description = "Memory limit in Gi for Spring Boot"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "springboot_concurrency" {
   description = "Max concurrent requests per Spring Boot instance"
   type        = number
-  default     = 40
+  default     = 10
 }
 
 variable "springboot_min_instances" {
@@ -756,6 +756,35 @@ variable "transfer_queue_max_dispatches_per_second" {
 
 variable "transfer_queue_max_attempts" {
   description = "Max delivery attempts for a drive-file-transfers task before Cloud Tasks gives up. MUST be >= the app's app.transfer.max-attempts (default 5, AppRuntimeProperties.Transfer.maxAttempts) so the app's own retry/DLQ classification (T24) is always the terminator, never the queue."
+  type        = number
+  default     = 5
+}
+
+# ─── Cloud Tasks — drive-file-discovery queue (cloudtasks.tf) ───────────
+# CloudTasksPublisher.java resolves this as a SEPARATE queue from
+# drive-file-transfers (discoveryQueuePath = QueueName.of(projectId, location,
+# "drive-file-discovery")) for discover-folder tasks, introduced by the
+# discovery-queue-fairness work (PR #264) but the queue resource itself was
+# never provisioned — first surfaced 2026-09-25 as a live NOT_FOUND incident
+# breaking all Box/Drive folder imports. Defaults mirror the sibling
+# drive-file-transfers queue (same rate-limit reasoning: bounded well under
+# springboot_concurrency x springboot_max_instances, modest for Cloud NAT +
+# Box API rate limits) since discover-folder tasks hold the same kind of
+# concurrent Box/Drive connection as process-file tasks.
+variable "discovery_queue_max_concurrent_dispatches" {
+  description = "Max simultaneously-running drive-file-discovery tasks (concurrent Box/Drive folder-listing connections). Mirrors transfer_queue_max_concurrent_dispatches."
+  type        = number
+  default     = 20
+}
+
+variable "discovery_queue_max_dispatches_per_second" {
+  description = "Max dispatch rate for the drive-file-discovery queue. Mirrors transfer_queue_max_dispatches_per_second."
+  type        = number
+  default     = 10
+}
+
+variable "discovery_queue_max_attempts" {
+  description = "Max delivery attempts for a drive-file-discovery task before Cloud Tasks gives up. MUST be >= the app's app.transfer.max-attempts (same T24 retry/DLQ reasoning as transfer_queue_max_attempts)."
   type        = number
   default     = 5
 }
