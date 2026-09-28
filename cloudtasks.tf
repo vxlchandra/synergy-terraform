@@ -78,3 +78,28 @@ resource "google_cloud_tasks_queue" "drive_file_discovery" {
     max_doublings = 4
   }
 }
+
+# Provisions the project-deletion queue used by CloudTasksPublisher.java's
+# enqueueProjectDeletion (2026-09-28) — moves ProjectDeletionAdminService's
+# GCS+Firestore+Postgres cascade off the admin DELETE request's own thread.
+# See variables.tf's project_deletion_queue_* for the full incident context
+# and why this MUST be applied before the app code that references it ships.
+resource "google_cloud_tasks_queue" "project_deletion" {
+  name     = "project-deletion"
+  location = var.region
+  project  = var.project_id
+
+  depends_on = [google_project_service.required_apis["cloudtasks.googleapis.com"]]
+
+  rate_limits {
+    max_dispatches_per_second = var.project_deletion_queue_max_dispatches_per_second
+    max_concurrent_dispatches = var.project_deletion_queue_max_concurrent_dispatches
+  }
+
+  retry_config {
+    max_attempts  = var.project_deletion_queue_max_attempts
+    min_backoff   = "10s"
+    max_backoff   = "300s"
+    max_doublings = 4
+  }
+}
