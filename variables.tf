@@ -859,3 +859,37 @@ variable "discovery_queue_max_attempts" {
   type        = number
   default     = 5
 }
+
+# ─── Cloud Tasks — project-deletion queue (cloudtasks.tf) ───────────────
+# CloudTasksPublisher.java resolves this as projectDeletionQueuePath =
+# QueueName.of(projectId, location, "project-deletion"). Added 2026-09-28 to
+# move ProjectDeletionAdminService's GCS+Firestore+Postgres cascade off the
+# admin DELETE request's own thread (36-59s observed synchronously; a large
+# project risks exceeding the Cloud Run request timeout and being
+# force-killed mid-cascade with no rollback). This is a LOW-VOLUME,
+# admin-triggered queue (never more than one or two deletions in flight at
+# once in practice) — limits are deliberately conservative, not sized for
+# throughput the way the transfer/discovery queues are.
+#
+# LESSON FROM THE 2026-09-25 drive-file-discovery INCIDENT: the app referenced
+# that queue in code before the queue RESOURCE was ever applied, and the first
+# live discover-folder task failed NOT_FOUND. Do not repeat that here — this
+# resource must be `terraform apply`'d BEFORE the app code that calls
+# CloudTasksPublisher#enqueueProjectDeletion is deployed, not after.
+variable "project_deletion_queue_max_concurrent_dispatches" {
+  description = "Max simultaneously-running project-deletion cascades. Kept small — this is an admin-only, low-frequency operation, not a per-user fan-out."
+  type        = number
+  default     = 3
+}
+
+variable "project_deletion_queue_max_dispatches_per_second" {
+  description = "Max dispatch rate for the project-deletion queue. Low on purpose — an admin script looping over many projects should still be throttled against GCS/Firestore/Postgres, not just against Cloud Tasks."
+  type        = number
+  default     = 2
+}
+
+variable "project_deletion_queue_max_attempts" {
+  description = "Max delivery attempts for a project-deletion task. The cascade is idempotent (delete-if-exists / delete-where-matching throughout), so a retry after a transient failure or a Cloud Tasks-level timeout safely resumes rather than double-deleting."
+  type        = number
+  default     = 3
+}
