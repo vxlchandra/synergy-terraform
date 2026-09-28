@@ -84,8 +84,16 @@ resource "google_cloud_tasks_queue" "drive_file_discovery" {
 # GCS+Firestore+Postgres cascade off the admin DELETE request's own thread.
 # See variables.tf's project_deletion_queue_* for the full incident context
 # and why this MUST be applied before the app code that references it ships.
+#
+# Named -v2: the original "project-deletion" queue was destroyed within an hour of
+# creation by a `terraform apply` run from a checkout that predated this resource —
+# Terraform saw it in remote state but missing from that stale config and destroyed
+# it as drift correction. Cloud Tasks then blocks recreating a queue under the same
+# name for up to 7 days (same failure mode as the 2026-09-25 drive-file-discovery
+# incident below). Always run `terraform plan` against a freshly-pulled `develop`
+# before apply — never from an older branch/worktree — to avoid repeating this.
 resource "google_cloud_tasks_queue" "project_deletion" {
-  name     = "project-deletion"
+  name     = "project-deletion-v2"
   location = var.region
   project  = var.project_id
 
