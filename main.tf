@@ -805,18 +805,25 @@ resource "google_pubsub_subscription" "classifier_request_sub" {
   ack_deadline_seconds       = 300
   message_retention_duration = "604800s" # 7 days
 
-  # Push subscription (preferred for Cloud Run minScale=0 — Pub/Sub wakes the instance).
-  # Set var.classifier_push_endpoint_url after first deploy to activate push mode.
-  # When the variable is empty, a pull subscription is created (safe default for initial deploy).
-  dynamic "push_config" {
-    for_each = var.classifier_push_endpoint_url != "" ? [1] : []
-    content {
-      push_endpoint = var.classifier_push_endpoint_url
-      oidc_token {
-        service_account_email = google_service_account.classifier[0].email
-        audience              = var.classifier_push_endpoint_url
-      }
-    }
+  # push_config is DELIBERATELY NOT DECLARED, and deliberately ignored — same fix
+  # as classification_wake_push below, applied here 2026-09-30 after this exact
+  # resource caused a real recurring incident: `var.classifier_push_endpoint_url`
+  # is set NOWHERE (not in vars/zsynergy.tfvars, not via TF_VAR_), so it defaults
+  # to "" and the old `dynamic "push_config"` block below rendered ZERO times.
+  # Any `terraform apply` therefore issued modifyPushConfig with an empty
+  # endpoint, silently reverting this subscription from push back to PULL —
+  # undoing the manual `gcloud pubsub subscriptions update --push-endpoint=...`
+  # fix every time, with the oldest-unacked-message-age alert as the only signal
+  # (it fired at least twice: 2026-09-30 ~04:00 UTC and again ~10:00 UTC, both
+  # traced back to this gap, not a classifier bug).
+  #
+  # Terraform manages the attributes it can compute correctly (ack deadline,
+  # DLQ, retention) and never touches the push config; that is set out-of-band
+  # at deploy time, where the service URL is actually known — see
+  # `document-classification-request-dlq-sub`'s sibling comment for the
+  # original diagnosis of this pattern on `classification-wake-push`.
+  lifecycle {
+    ignore_changes = [push_config]
   }
 
   dead_letter_policy {
