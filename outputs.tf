@@ -142,6 +142,8 @@ output "iam_summary" {
       "roles/storage.objectCreator",
       "roles/datastore.user",
       "roles/secretmanager.secretAccessor",
+      "sftpSecretManagerCreate (custom, project-scoped, secrets.create only — see sftp_secret_iam.tf)",
+      "sftpSecretManagerManage (custom, resource-scoped to sftp-* secrets — delete/versions.add/versions.access)",
     ]
     classifier = var.enable_classifier ? google_service_account.classifier[0].email : "disabled"
     classifier_roles = [

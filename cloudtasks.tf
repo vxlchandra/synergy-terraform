@@ -45,3 +45,70 @@ resource "google_cloud_tasks_queue" "drive_file_transfers" {
     max_doublings = 4
   }
 }
+
+# Separate queue for discover-folder tasks, split off drive-file-transfers
+# 2026-09-24. A discover-folder task is one cheap Box/Drive metadata list
+# call; a process-file task streams actual file bytes. Sharing one queue
+# meant a massive folder's tree discovery competed with its own in-flight
+# downloads for the same rate_limits budget, so downloads could starve
+# remaining discovery -- the Transfer Center UI's file counts stalled behind
+# whatever was already downloading instead of the tree finishing enumeration
+# quickly. Split so each can be tuned against its own real cost: discovery
+# is metadata-only and can run closer to Box's published per-user rate limit
+# (1000 req/min ≈ 16.6/s, verified against developer.box.com 2026-09-24)
+# than the existing transfer queue's more conservative default.
+resource "google_cloud_tasks_queue" "drive_file_discovery" {
+  name     = "drive-file-discovery"
+  location = var.region
+  project  = var.project_id
+
+  depends_on = [google_project_service.required_apis["cloudtasks.googleapis.com"]]
+
+  rate_limits {
+    max_dispatches_per_second = var.discovery_queue_max_dispatches_per_second
+    max_concurrent_dispatches = var.discovery_queue_max_concurrent_dispatches
+  }
+
+  # Same reasoning as drive_file_transfers.retry_config above: must stay
+  # >= app.transfer.max-attempts so the app's own T24 retry/DLQ
+  # classification is always what terminates a task, never the queue.
+  retry_config {
+    max_attempts  = var.discovery_queue_max_attempts
+    min_backoff   = "10s"
+    max_backoff   = "300s"
+    max_doublings = 4
+  }
+}
+
+# Provisions the project-deletion queue used by CloudTasksPublisher.java's
+# enqueueProjectDeletion (2026-09-28) — moves ProjectDeletionAdminService's
+# GCS+Firestore+Postgres cascade off the admin DELETE request's own thread.
+# See variables.tf's project_deletion_queue_* for the full incident context
+# and why this MUST be applied before the app code that references it ships.
+#
+# Named -v2: the original "project-deletion" queue was destroyed within an hour of
+# creation by a `terraform apply` run from a checkout that predated this resource —
+# Terraform saw it in remote state but missing from that stale config and destroyed
+# it as drift correction. Cloud Tasks then blocks recreating a queue under the same
+# name for up to 7 days (same failure mode as the 2026-09-25 drive-file-discovery
+# incident below). Always run `terraform plan` against a freshly-pulled `develop`
+# before apply — never from an older branch/worktree — to avoid repeating this.
+resource "google_cloud_tasks_queue" "project_deletion" {
+  name     = "project-deletion-v2"
+  location = var.region
+  project  = var.project_id
+
+  depends_on = [google_project_service.required_apis["cloudtasks.googleapis.com"]]
+
+  rate_limits {
+    max_dispatches_per_second = var.project_deletion_queue_max_dispatches_per_second
+    max_concurrent_dispatches = var.project_deletion_queue_max_concurrent_dispatches
+  }
+
+  retry_config {
+    max_attempts  = var.project_deletion_queue_max_attempts
+    min_backoff   = "10s"
+    max_backoff   = "300s"
+    max_doublings = 4
+  }
+}

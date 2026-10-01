@@ -482,9 +482,22 @@ variable "rastersvc_max_pages" {
 }
 
 variable "enable_officesvc" {
-  description = "Create the officesvc Cloud Run service + its SA/IAM. FALSE because it is authored but NOT YET APPLIED — flip to true in the SAME change that applies it, or a clean checkout plans to destroy it (see the note in officesvc.tf)."
+  description = <<-EOT
+  Create the officesvc Cloud Run service + its SA/IAM.
+
+  LIVE — default corrected on review before an actual `terraform plan` was
+  ever run against real state (2026-09-17). `terraform state list` shows
+  google_cloud_run_v2_service.officesvc[0], its SA, and its IAM bindings all
+  already exist. The header in officesvc.tf and this description previously
+  said "AUTHORED, NOT APPLIED" / default false, and BOTH were wrong — this
+  was the exact graphsvc/rastersvc "clean-checkout plans a destroy" trap that
+  same file's own comment warns about, just never caught here because no one
+  had generated a real plan since it was actually deployed. prevent_destroy
+  was already present (someone had learned the graphsvc lesson), which is
+  the only reason this surfaced as a hard error instead of a silent apply.
+  EOT
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "enable_frontend_cloudrun" {
@@ -581,6 +594,86 @@ variable "officesvc_convert_timeout" {
   description = "Seconds before one conversion is abandoned. LibreOffice can hang on a malformed document and would otherwise hold the single worker indefinitely. Must match OFFICE_CONVERT_TIMEOUT in officesvc/convert.py."
   type        = number
   default     = 180
+}
+
+# ─── Cloud Run — svcapp (hybrid search, POST /search) ─────────────────────
+variable "enable_svcapp" {
+  description = <<-EOT
+  Create the svcapp Cloud Run service + its SA/IAM/DB login.
+
+  FALSE, and correctly so — NOTHING in svcapp.tf exists in GCP yet, so a
+  clean-checkout plan is a no-op rather than a proposed destroy. This is the
+  one state in which a false default is safe.
+
+  WHEN YOU ENABLE IT, flip this default to true in the SAME change. Do not
+  apply with `-var enable_svcapp=true` and leave the default here at false:
+  terraform.tfvars is gitignored, so the next clean-checkout plan would then
+  propose DESTROYING the live service — the exact trap that hit graphsvc,
+  rastersvc and officesvc (see the header of officesvc.tf).
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "svcapp_service_name" {
+  description = "Cloud Run service name for the hybrid-search (FastAPI) service"
+  type        = string
+  default     = "aeromontek-svcapp"
+}
+
+variable "svcapp_image" {
+  description = "Docker image for svcapp. Built from classifier/Dockerfile.svcapp (FastAPI + baked local embedder/reranker + pg8000/pgvector)."
+  type        = string
+  default     = "us-docker.pkg.dev/zsynergy/zsynergy/aeromontek-svcapp:latest"
+}
+
+variable "svcapp_cpu" {
+  description = "CPU limit for svcapp. The cross-encoder rerank is the CPU-bound step; below 2 a reranked search gets materially slower."
+  type        = string
+  default     = "2"
+}
+
+variable "svcapp_memory" {
+  description = "Memory limit in Gi. Holds torch + the embedder + the cross-encoder resident per instance; 4 is the floor that has headroom over the two model loads."
+  type        = number
+  default     = 4
+}
+
+variable "svcapp_concurrency" {
+  description = "Max concurrent requests per instance. Also injected as DB_POOL_SIZE so in-flight searches can never exceed the pooled pg8000 connections to the shared Cloud SQL instance."
+  type        = number
+  default     = 4
+}
+
+variable "svcapp_min_instances" {
+  description = "Minimum instances (0 = scale-to-zero). Scale-to-zero means the first search after idle pays the model load; raise to 1 if that latency is felt in the UI."
+  type        = number
+  default     = 0
+}
+
+variable "svcapp_max_instances" {
+  description = "Maximum instances for svcapp. Bounded deliberately: each instance holds its own DB pool against the shared Cloud SQL instance."
+  type        = number
+  default     = 5
+}
+
+variable "svcapp_max_top_k" {
+  description = "Upper bound for a search request's top_k (svcapp 400s anything outside [1, this]). Mirrors SEARCH_MAX_TOP_K's default in src/svcapp/app.py."
+  type        = number
+  default     = 100
+}
+
+variable "svcapp_internal_secret_name" {
+  description = <<-EOT
+  Secret Manager secret holding the shared internal-auth value (INTERNAL_API_SECRET).
+
+  READ, not created — it is absent from var.secret_names, so this repo does not
+  manage it. It MUST be the same secret aeromontek-api reads, or every search
+  401s: both the live API and the live classifier read
+  `aeromon-internal-api-secret` today.
+  EOT
+  type        = string
+  default     = "aeromon-internal-api-secret"
 }
 
 # ─── CORS (Centralized — shared by Spring Boot API + Classifier) ────────
@@ -793,4 +886,58 @@ variable "transfer_queue_max_attempts" {
   description = "Max delivery attempts for a drive-file-transfers task before Cloud Tasks gives up. MUST be >= the app's app.transfer.max-attempts (default 5, AppRuntimeProperties.Transfer.maxAttempts) so the app's own retry/DLQ classification (T24) is always the terminator, never the queue."
   type        = number
   default     = 5
+}
+
+# ─── Cloud Tasks — drive-file-discovery queue (split from drive-file-transfers
+# 2026-09-24, cloudtasks.tf) ────────────────────────────────────────────────
+variable "discovery_queue_max_concurrent_dispatches" {
+  description = "Max simultaneously-running discover-folder tasks (= concurrent Box/Drive metadata-list connections). A discover-folder call is a single cheap metadata list, not a file transfer, so this can run closer to Box's real per-user rate limit than transfer_queue_max_concurrent_dispatches without risking Box or Cloud NAT the way a download-heavy queue would."
+  type        = number
+  default     = 15
+}
+
+variable "discovery_queue_max_dispatches_per_second" {
+  description = "Max dispatch rate for the drive-file-discovery queue. Box's published limit (developer.box.com, verified 2026-09-24) is 1000 requests/min per user (~16.6/s); kept a bit under that (15/s) for headroom shared with the small number of other Box calls (download permission checks, credential refresh) a job also makes."
+  type        = number
+  default     = 15
+}
+
+variable "discovery_queue_max_attempts" {
+  description = "Max delivery attempts for a drive-file-discovery task before Cloud Tasks gives up. MUST be >= the app's app.transfer.max-attempts (default 5) for the same reason as transfer_queue_max_attempts -- the app's own T24 retry/DLQ classification must always be the terminator, never the queue."
+  type        = number
+  default     = 5
+}
+
+# ─── Cloud Tasks — project-deletion queue (cloudtasks.tf) ───────────────
+# CloudTasksPublisher.java resolves this as projectDeletionQueuePath =
+# QueueName.of(projectId, location, "project-deletion"). Added 2026-09-28 to
+# move ProjectDeletionAdminService's GCS+Firestore+Postgres cascade off the
+# admin DELETE request's own thread (36-59s observed synchronously; a large
+# project risks exceeding the Cloud Run request timeout and being
+# force-killed mid-cascade with no rollback). This is a LOW-VOLUME,
+# admin-triggered queue (never more than one or two deletions in flight at
+# once in practice) — limits are deliberately conservative, not sized for
+# throughput the way the transfer/discovery queues are.
+#
+# LESSON FROM THE 2026-09-25 drive-file-discovery INCIDENT: the app referenced
+# that queue in code before the queue RESOURCE was ever applied, and the first
+# live discover-folder task failed NOT_FOUND. Do not repeat that here — this
+# resource must be `terraform apply`'d BEFORE the app code that calls
+# CloudTasksPublisher#enqueueProjectDeletion is deployed, not after.
+variable "project_deletion_queue_max_concurrent_dispatches" {
+  description = "Max simultaneously-running project-deletion cascades. Kept small — this is an admin-only, low-frequency operation, not a per-user fan-out."
+  type        = number
+  default     = 3
+}
+
+variable "project_deletion_queue_max_dispatches_per_second" {
+  description = "Max dispatch rate for the project-deletion queue. Low on purpose — an admin script looping over many projects should still be throttled against GCS/Firestore/Postgres, not just against Cloud Tasks."
+  type        = number
+  default     = 2
+}
+
+variable "project_deletion_queue_max_attempts" {
+  description = "Max delivery attempts for a project-deletion task. The cascade is idempotent (delete-if-exists / delete-where-matching throughout), so a retry after a transient failure or a Cloud Tasks-level timeout safely resumes rather than double-deleting."
+  type        = number
+  default     = 3
 }

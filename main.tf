@@ -23,12 +23,19 @@ terraform {
 
   required_providers {
     google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
+      source = "hashicorp/google"
+      # Was "~> 5.0" — did not match .terraform.lock.hcl's actually-resolved
+      # 7.44.0 (itself recorded there as satisfying ">= 5.13.0" when it was
+      # locked), and blocked `terraform init` outright. cloudsql.tf's own
+      # comments already document 7.44.0-specific behavior (require_ssl
+      # removed), so the declared constraint was the stale side of this
+      # drift, not the lock file. Restoring the lock file's own recorded
+      # constraint rather than inventing a new one.
+      version = ">= 5.13.0"
     }
     google-beta = {
       source  = "hashicorp/google-beta"
-      version = "~> 5.0"
+      version = ">= 5.13.0"
     }
   }
 
