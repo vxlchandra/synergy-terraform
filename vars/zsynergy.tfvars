@@ -59,8 +59,8 @@ classifier_image = "us-docker.pkg.dev/zsynergy/zsynergy/aeromontek-classifier:la
 # ─── Cloud Run — Spring Boot ─────────────────────────────────────────────
 springboot_service_name  = "aeromontek-api"
 springboot_cpu           = "1"
-springboot_memory        = 1
-springboot_concurrency   = 40
+springboot_memory        = 2
+springboot_concurrency   = 10
 springboot_min_instances = 0
 springboot_max_instances = 10
 
