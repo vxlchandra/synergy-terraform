@@ -831,6 +831,24 @@ resource "google_pubsub_subscription" "classifier_request_sub" {
     max_delivery_attempts = 5
   }
 
+  # ignore_changes = [push_config] — found 2026-10-01 while recovering the
+  # orphaned graphsvc KB-writer resources: var.classifier_push_endpoint_url is
+  # unset everywhere in this repo (grepped main.tf/variables.tf/vars/*.tfvars,
+  # no TF_VAR_ override either), so the dynamic block above renders EMPTY and
+  # a plan proposes stripping the real, live push_config (confirmed via
+  # `terraform plan`'s refresh: push_endpoint
+  # https://aeromontek-classifier-qy24fq5gwa-uk.a.run.app/pubsub/push) back to
+  # a bare pull subscription. Nothing pulls this subscription, so that would
+  # have stalled the entire classification request pipeline with no error
+  # anywhere — the exact same failure mode classification_wake_push below was
+  # already patched against; this sibling resource was missed. Same fix: let
+  # Terraform manage everything it computes correctly and never touch
+  # push_config, which is set at deploy time where the real service URL is
+  # known.
+  lifecycle {
+    ignore_changes = [push_config]
+  }
+
   depends_on = [google_pubsub_topic.topics]
 }
 
