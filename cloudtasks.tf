@@ -56,6 +56,24 @@ resource "google_cloud_tasks_queue" "drive_file_transfers" {
 # is metadata-only and can run closer to Box's published per-user rate limit
 # (1000 req/min ≈ 16.6/s, verified against developer.box.com 2026-09-24)
 # than the existing transfer queue's more conservative default.
+#
+# INCIDENT (2026-09-25): the original "drive-file-discovery" queue was
+# deleted at 19:14:52 UTC the same day (audit log: google.cloud.tasks.v2.
+# CloudTasks.DeleteQueue, principal chandra@vxlllc.com — almost certainly an
+# in-session gcloud action, not a deliberate deprovision), breaking every
+# Box/Drive folder import with NOT_FOUND. A "-v2" rename was considered at
+# the time (Cloud Tasks blocks recreating a queue under the same name for
+# ~7 days after deletion) but was NOT carried through: both the live queue
+# and the app's default (application.yaml's
+# CLOUD_TASKS_DISCOVERY_QUEUE:drive-file-discovery, CloudTasksPublisher.java)
+# use the plain name — confirmed 2026-10-01 via `gcloud tasks queues
+# describe drive-file-discovery` (RUNNING) and Terraform state, after this
+# resource was found orphaned from a divergent branch and recovered. Do not
+# reintroduce "-v2" for this queue without updating the app default too.
+#
+# Name/location MUST match QueueName.of(projectId, location, <name>) as
+# resolved by app.cloud-tasks.discovery-queue in CloudTasksPublisher.java,
+# same location var as drive-file-transfers.
 resource "google_cloud_tasks_queue" "drive_file_discovery" {
   name     = "drive-file-discovery"
   location = var.region
