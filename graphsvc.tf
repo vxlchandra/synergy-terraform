@@ -93,6 +93,18 @@ resource "google_secret_manager_secret_iam_member" "graphsvc_db_password_dedicat
   member    = "serviceAccount:${google_service_account.graphsvc[0].email}"
 }
 
+# Access to the KB-ontology write login's secret (cloudsql.tf:
+# graphsvc_kb_writer). Purely additive, same shape as the grant above. Backs
+# the admin create/update/reload endpoints in classifier/src/graphsvc/kb_admin.py
+# — see terraform/sql/kb_ontology_schema.sql for the schema this login writes.
+resource "google_secret_manager_secret_iam_member" "graphsvc_kb_writer_db_password" {
+  count     = var.enable_graphsvc ? 1 : 0
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.graphsvc_kb_writer_db_password.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.graphsvc[0].email}"
+}
+
 # --- Cloud Run service -------------------------------------------------------
 resource "google_cloud_run_v2_service" "graphsvc" {
   count    = var.enable_graphsvc ? 1 : 0
@@ -204,6 +216,29 @@ resource "google_cloud_run_v2_service" "graphsvc" {
       env {
         name  = "GRAPH_NAME"
         value = var.graphsvc_graph_name
+      }
+
+      # --- KB-ontology admin write login (kb_admin.py) -----------------------
+      # SEPARATE credential from DB_USER/DB_PASSWORD above (graphsvc_reader is
+      # read-only on `extractions`). Backs classifier/src/loader/kb_source.py's
+      # read of kb_ontology_nodes/kb_ontology_edges and kb_admin.py's writes to
+      # them. Same connector socket/DB_HOST/DB_NAME as above — only the login
+      # differs. As with DB_USER/DB_PASSWORD, this codifies intended state for
+      # RECREATION only (`lifecycle.ignore_changes = all`); an operator must
+      # run the manual GRANT (cloudsql.tf) then `gcloud run services update` to
+      # rotate the live service onto these vars.
+      env {
+        name  = "KB_DB_USER"
+        value = "graphsvc_kb_writer"
+      }
+      env {
+        name = "KB_DB_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.graphsvc_kb_writer_db_password.secret_id
+            version = "latest"
+          }
+        }
       }
     }
 

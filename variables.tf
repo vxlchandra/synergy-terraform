@@ -243,15 +243,15 @@ variable "springboot_cpu" {
 }
 
 variable "springboot_memory" {
-  description = "Memory limit in Gi for Spring Boot"
+  description = "Memory limit in Gi for Spring Boot. 2 (not the historical 1) to match an OOM mitigation already applied directly to the live Cloud Run service — keeping this default in sync prevents a future `terraform apply` from this module silently reverting it back to 1Gi."
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "springboot_concurrency" {
-  description = "Max concurrent requests per Spring Boot instance"
+  description = "Max concurrent requests per Spring Boot instance. 10 (not the historical 40) — lower per-instance concurrency alongside the memory increase above, same OOM mitigation, same terraform-drift-prevention reasoning."
   type        = number
-  default     = 40
+  default     = 10
 }
 
 variable "springboot_min_instances" {

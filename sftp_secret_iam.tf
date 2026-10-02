@@ -59,10 +59,14 @@
 # Mirrors this project's existing graphsvc_reader least-privilege pattern
 # (cloudsql.tf) — a dedicated, narrowly-scoped principal per integration
 # rather than reusing a broad built-in role — applied here to Secret Manager
-# instead of Cloud SQL. (graphsvc_kb_writer, previously also cited here, does
-# not exist in this branch/PR's base — it lives only on the separate,
-# unmerged feat/ontology-graph-admin branch. Removed the reference rather
-# than cite a sibling resource that isn't actually part of this codebase.)
+# instead of Cloud SQL. (graphsvc_kb_writer, previously cited here then
+# removed when it lived only on the separate, unmerged feat/ontology-graph-
+# admin branch, is back as of 2026-10-01: that branch is now merged into this
+# one to recover the secret/IAM grant/SQL login it provisions, orphaned and
+# destroyed by this branch's own prior divergence — see cloudsql.tf's
+# graphsvc_kb_writer_db_password resources and graphsvc.tf's matching IAM
+# grant. Included here for incident recovery, not scope creep: graphsvc was
+# actively down in production.)
 #
 # CORRECTED (re-review): the Spring Boot SA does NOT arrive at this PR with
 # zero Secret Manager access, as an earlier version of this comment claimed.
