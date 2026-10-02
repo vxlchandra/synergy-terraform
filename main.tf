@@ -813,8 +813,15 @@ resource "google_pubsub_subscription" "classifier_request_sub" {
   message_retention_duration = "604800s" # 7 days
 
   # Push subscription (preferred for Cloud Run minScale=0 — Pub/Sub wakes the instance).
-  # Set var.classifier_push_endpoint_url after first deploy to activate push mode.
-  # When the variable is empty, a pull subscription is created (safe default for initial deploy).
+  #
+  # CORRECTED 2026-10-01 (Copilot review, PR #23): var.classifier_push_endpoint_url
+  # is unset everywhere in this repo and the resource below carries
+  # `lifecycle.ignore_changes = [push_config]`, so setting this variable after
+  # deploy — as this comment used to instruct — no longer has any effect.
+  # push_config is deploy-time managed, same reasoning as the sibling
+  # classification_wake_push resource below: the real endpoint is only known
+  # where the service URL is, not here, and Terraform must never silently
+  # strip the live value back to empty/pull on an unrelated apply.
   dynamic "push_config" {
     for_each = var.classifier_push_endpoint_url != "" ? [1] : []
     content {

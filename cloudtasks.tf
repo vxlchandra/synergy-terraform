@@ -24,8 +24,9 @@ resource "google_cloud_tasks_queue" "drive_file_transfers" {
 
   # Coherence: max_concurrent_dispatches bounds how many discover-folder /
   # process-file tasks run at once — each one holds a concurrent connection
-  # to Box. This is kept well under Cloud Run's springboot_concurrency (40)
-  # × springboot_max_instances (10) = ~400 request slots, and deliberately
+  # to Box. This is kept well under Cloud Run's springboot_concurrency (10,
+  # corrected 2026-10-01 — was stale at the pre-OOM-mitigation value of 40)
+  # × springboot_max_instances (10) = ~100 request slots, and deliberately
   # modest relative to Cloud NAT capacity and Box's own per-app rate limits,
   # so a large transfer fan-out can't starve either.
   rate_limits {
