@@ -57,6 +57,17 @@ springboot_image = "us-docker.pkg.dev/zsynergy/zsynergy/aeromontek-api:latest"
 classifier_image = "us-docker.pkg.dev/zsynergy/zsynergy/aeromontek-classifier:latest"
 
 # ─── Cloud Run — Spring Boot ─────────────────────────────────────────────
+# memory/concurrency corrected 2026-10-01 (Copilot review, PR #23): these two
+# values were still the pre-mitigation 1/40 despite variables.tf's own
+# defaults being bumped to 2/10 to "match an OOM mitigation already applied
+# directly to the live Cloud Run service" — since main.tf applies with
+# `-var-file="vars/zsynergy.tfvars"`, THIS file's values are what actually
+# govern an apply, not the variable defaults. The springboot service itself
+# carries `lifecycle.ignore_changes = all` (main.tf, "managed by
+# deploy_gcp.sh"), so day-to-day applies were not silently reverting the live
+# mitigation — but a stale value here was still wrong-by-construction and
+# would bite the moment that ignore_changes block is ever removed or the
+# resource recreated from scratch.
 springboot_service_name  = "aeromontek-api"
 springboot_cpu           = "1"
 springboot_memory        = 2

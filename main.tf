@@ -813,8 +813,15 @@ resource "google_pubsub_subscription" "classifier_request_sub" {
   message_retention_duration = "604800s" # 7 days
 
   # Push subscription (preferred for Cloud Run minScale=0 — Pub/Sub wakes the instance).
-  # Set var.classifier_push_endpoint_url after first deploy to activate push mode.
-  # When the variable is empty, a pull subscription is created (safe default for initial deploy).
+  #
+  # CORRECTED 2026-10-01 (Copilot review, PR #23): var.classifier_push_endpoint_url
+  # is unset everywhere in this repo and the resource below carries
+  # `lifecycle.ignore_changes = [push_config]`, so setting this variable after
+  # deploy — as this comment used to instruct — no longer has any effect.
+  # push_config is deploy-time managed, same reasoning as the sibling
+  # classification_wake_push resource below: the real endpoint is only known
+  # where the service URL is, not here, and Terraform must never silently
+  # strip the live value back to empty/pull on an unrelated apply.
   dynamic "push_config" {
     for_each = var.classifier_push_endpoint_url != "" ? [1] : []
     content {
@@ -829,6 +836,24 @@ resource "google_pubsub_subscription" "classifier_request_sub" {
   dead_letter_policy {
     dead_letter_topic     = google_pubsub_topic.topics["document-classification-request-dlq"].id
     max_delivery_attempts = 5
+  }
+
+  # ignore_changes = [push_config] — found 2026-10-01 while recovering the
+  # orphaned graphsvc KB-writer resources: var.classifier_push_endpoint_url is
+  # unset everywhere in this repo (grepped main.tf/variables.tf/vars/*.tfvars,
+  # no TF_VAR_ override either), so the dynamic block above renders EMPTY and
+  # a plan proposes stripping the real, live push_config (confirmed via
+  # `terraform plan`'s refresh: push_endpoint
+  # https://aeromontek-classifier-qy24fq5gwa-uk.a.run.app/pubsub/push) back to
+  # a bare pull subscription. Nothing pulls this subscription, so that would
+  # have stalled the entire classification request pipeline with no error
+  # anywhere — the exact same failure mode classification_wake_push below was
+  # already patched against; this sibling resource was missed. Same fix: let
+  # Terraform manage everything it computes correctly and never touch
+  # push_config, which is set at deploy time where the real service URL is
+  # known.
+  lifecycle {
+    ignore_changes = [push_config]
   }
 
   depends_on = [google_pubsub_topic.topics]
