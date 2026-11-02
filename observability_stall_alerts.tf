@@ -58,7 +58,7 @@ locals {
   # today — all 7 live channels are email; adding one is an owner decision).
   critical_channel_ids = concat(local.email_channel_ids, var.alert_pager_channel_ids)
 
-  runbook = "Runbook: arch-obs-standard.md (stall/starvation platform standard; to be published under Synergy-Architecture-And-Design docs/platform/)"
+  runbook = "Runbook: none published yet. Triage from this alert's description and the linked metric/logs; the stall/starvation standard (arch-obs-standard.md) is still to be written in Synergy-Architecture-And-Design docs/platform/."
 
   request_log_services_filter = join(" OR ", [
     for s in var.request_log_services : "resource.labels.service_name=\"${s}\""
@@ -132,7 +132,7 @@ resource "google_logging_metric" "api_rate_limit_rejections" {
   name    = "api_rate_limit_rejections"
   filter = join("\n", [
     "resource.type=\"cloud_run_revision\"",
-    "resource.labels.service_name=\"aeromontek-api\"",
+    "resource.labels.service_name=\"${var.springboot_service_name}\"",
     "textPayload:\"[rate-limit]\"",
   ])
   metric_descriptor {
@@ -357,7 +357,7 @@ resource "google_monitoring_alert_policy" "classifier_starvation" {
       filter = join(" AND ", [
         "metric.type=\"run.googleapis.com/container/instance_count\"",
         "resource.type=\"cloud_run_revision\"",
-        "resource.labels.service_name=\"aeromontek-classifier\"",
+        "resource.labels.service_name=\"${var.classifier_service_name}\"",
         "metric.labels.state=\"active\"",
       ])
       duration        = "600s"
@@ -430,7 +430,7 @@ resource "google_monitoring_alert_policy" "api_saturation" {
       filter = join(" AND ", [
         "metric.type=\"run.googleapis.com/container/instance_count\"",
         "resource.type=\"cloud_run_revision\"",
-        "resource.labels.service_name=\"aeromontek-api\"",
+        "resource.labels.service_name=\"${var.springboot_service_name}\"",
         "metric.labels.state=\"active\"",
       ])
       duration        = "900s"
@@ -483,7 +483,7 @@ resource "google_monitoring_alert_policy" "firestore_contention" {
     condition_threshold {
       filter = join(" AND ", [
         "metric.type=\"firestore.googleapis.com/api/request_count\"",
-        "resource.type=\"datastore_request\"",
+        "resource.type=\"firestore.googleapis.com/Database\"",
         "metric.labels.response_code=\"ABORTED\"",
       ])
       duration        = "900s"
@@ -533,7 +533,7 @@ resource "google_monitoring_alert_policy" "api_memory_pressure" {
       filter = join(" AND ", [
         "metric.type=\"run.googleapis.com/container/memory/utilizations\"",
         "resource.type=\"cloud_run_revision\"",
-        "resource.labels.service_name=\"aeromontek-api\"",
+        "resource.labels.service_name=\"${var.springboot_service_name}\"",
       ])
       duration        = "1800s"
       comparison      = "COMPARISON_GT"
