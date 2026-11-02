@@ -271,6 +271,20 @@ resource "google_monitoring_alert_policy" "ingestion_canary_missing_ack" {
 # real invocation volume over a rolling window, independent of the canary's
 # fixed cadence (catches a PARTIAL delivery-rate degradation the canary might
 # miss between its own 15-minute checks).
+# PromQL `monitored_resource` accepts only an exact `=` matcher (a `=~` regex
+# makes the condition invalid at apply time), so the writes metric - present on
+# cloud_function and, for seeder continuations, cloud_run_revision - is summed
+# from two exact-match terms. `or vector(0)` keeps one side's absence from
+# emptying the sum; zero total writes yields NaN/-Inf, which never exceeds the
+# threshold, preserving the old "no writes means no evaluation" behaviour.
+locals {
+  ingestion_writes_rate_promql = format(
+    "((sum(rate(logging_googleapis_com:user_%s{monitored_resource=\"cloud_function\"}[%ds])) or vector(0)) + (sum(rate(logging_googleapis_com:user_%s{monitored_resource=\"cloud_run_revision\"}[%ds])) or vector(0)))",
+    try(google_logging_metric.active_ingestion_writes[0].name, ""), var.alert_ingestion_divergence_window_seconds,
+    try(google_logging_metric.active_ingestion_writes[0].name, ""), var.alert_ingestion_divergence_window_seconds,
+  )
+}
+
 resource "google_monitoring_alert_policy" "ingestion_delivery_divergence" {
   count        = length(var.alert_email_recipients) > 0 ? 1 : 0
   project      = var.project_id
@@ -293,9 +307,9 @@ resource "google_monitoring_alert_policy" "ingestion_delivery_divergence" {
     # sample, the old `filter writes > 0`).
     condition_prometheus_query_language {
       query = join("", [
-        "(sum(rate(logging_googleapis_com:user_${google_logging_metric.active_ingestion_writes[0].name}{monitored_resource=~\"cloud_function|cloud_run_revision\"}[${var.alert_ingestion_divergence_window_seconds}s]))",
+        "(${local.ingestion_writes_rate_promql}",
         " - (sum(rate(logging_googleapis_com:user_${google_logging_metric.ingestion_activation_invocations[0].name}{monitored_resource=\"cloud_run_revision\"}[${var.alert_ingestion_divergence_window_seconds}s])) or vector(0)))",
-        " / sum(rate(logging_googleapis_com:user_${google_logging_metric.active_ingestion_writes[0].name}{monitored_resource=~\"cloud_function|cloud_run_revision\"}[${var.alert_ingestion_divergence_window_seconds}s]))",
+        " / ${local.ingestion_writes_rate_promql}",
         " > ${var.alert_ingestion_divergence_ratio_threshold}",
       ])
       duration            = "${var.alert_ingestion_divergence_window_seconds}s"
