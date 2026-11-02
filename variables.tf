@@ -941,3 +941,105 @@ variable "project_deletion_queue_max_attempts" {
   type        = number
   default     = 3
 }
+
+# ─── Stall / starvation alerting + request-log sink v2 (observability_stall_alerts.tf) ──
+# READ the enable_* delete-trap note at the top of observability_stall_alerts.tf
+# before applying: applying either flag MUST flip its default to true in the
+# same change, or a clean-checkout plan proposes destroying what was applied.
+variable "enable_job_health_alerting" {
+  description = "Create the stall/starvation log-based metrics and alert policies. Authored, NOT applied. Also requires alert_email_recipients to be non-empty. If you apply this, flip this default to true in the same change."
+  type        = bool
+  default     = false
+}
+
+variable "enable_request_log_sink_v2" {
+  description = "Create the us-east4 partitioned request-log dataset + sink covering request_log_services. Authored, NOT applied. If you apply this, flip this default to true in the same change (dataset and sink also carry prevent_destroy)."
+  type        = bool
+  default     = false
+}
+
+variable "alert_pager_channel_ids" {
+  description = "EXISTING Cloud Monitoring notification channel ids (e.g. a pager/SMS channel created by the owner) added to CRITICAL stall/starvation policies. Empty by default: every live channel is email as of 2026-10-03; choosing a paging channel is an owner decision, not something this module invents."
+  type        = list(string)
+  default     = []
+}
+
+variable "alert_pubsub_oldest_unacked_seconds" {
+  description = "Pub/Sub starvation threshold. 900 s = 7.7x the highest active-subscription hourly-max p95 (classification-wake-push, 116 s) over 30 d to 2026-10-03; matches the existing hand-made 'Classifier queue stuck' policy."
+  type        = number
+  default     = 900
+}
+
+variable "pubsub_starvation_excluded_subscription_regex" {
+  description = "RE2 regex of subscriptions the Pub/Sub starvation policy ignores: DLQ subscriptions, plus the two pull subscriptions with no consumer in any repo (backlog p50 4.8k-6.2k messages, oldest up to 7 days, 2026-10-03). Remove an entry once that subscription is fixed or deleted."
+  type        = string
+  default     = ".*-dlq.*|document-classification-result-springboot-sub|document-classification-progress-firebase-sub"
+}
+
+variable "alert_classifier_max_scale" {
+  description = "Live maxScale of aeromontek-classifier (30, gcloud run services list 2026-10-03). Deliberately NOT classifier_max_instances, whose default (12) has drifted from the live service."
+  type        = number
+  default     = 30
+}
+
+variable "alert_api_max_scale" {
+  description = "Live maxScale of aeromontek-api (10, gcloud run services list 2026-10-03; same as springboot_max_instances' default)."
+  type        = number
+  default     = 10
+}
+
+variable "alert_firestore_aborted_per_minute" {
+  description = "Firestore contention threshold (ABORTED requests/minute, sustained 15 min). 500/min sits just above the 30-day hourly p99 (27,624/h = ~460/min); contention-storm hours ran 1,847-7,713/min."
+  type        = number
+  default     = 500
+}
+
+variable "alert_api_memory_utilization" {
+  description = "aeromontek-api p99 memory utilization threshold (sustained 30 min). 30-day hourly p99-of-p99 = 0.96, max 0.99."
+  type        = number
+  default     = 0.96
+}
+
+variable "alert_api_rate_limit_rejections_per_15m" {
+  description = "RateLimitFilter rejections per 15 minutes. 30 d: 11 of 720 hours had any 429; hourly p99 695, max 4,703."
+  type        = number
+  default     = 100
+}
+
+variable "alert_cloud_tasks_depth" {
+  description = "Cloud Tasks queue depth threshold (sustained 30 min). Above both busy queues' 30-day hourly-max p99 (drive-file-transfers 3,325; drive-file-discovery-v2 2,558)."
+  type        = number
+  default     = 4000
+}
+
+variable "request_log_dataset_id" {
+  description = "BigQuery dataset (us-east4) for request-log sink v2."
+  type        = string
+  default     = "analytics_requests"
+}
+
+variable "request_log_retention_days" {
+  description = "Partition expiration for request-log sink v2. 400 days keeps a full year for SLO/seasonality comparison at ~78 GB steady state (see cost note in observability_stall_alerts.tf)."
+  type        = number
+  default     = 400
+}
+
+variable "request_log_services" {
+  description = "Cloud Run service names whose HTTP request logs sink v2 captures. Default = every non-function service live on 2026-10-03 (zsynergy = the Firebase App Hosting backend)."
+  type        = list(string)
+  default = [
+    "aeromontek-api",
+    "aeromontek-classifier",
+    "aeromontek-graphsvc",
+    "aeromontek-rastersvc",
+    "aeromontek-officesvc",
+    "aeromontek-frontend",
+    "zsynergy",
+  ]
+}
+
+variable "request_log_include_all_services" {
+  description = "When true, sink v2 ignores request_log_services and captures every Cloud Run service, including the ~200 Firebase Functions services (1,848,493 requests/7 d total vs 408,495 for the default list)."
+  type        = bool
+  default     = false
+}
