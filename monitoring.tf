@@ -293,9 +293,9 @@ resource "google_monitoring_alert_policy" "ingestion_delivery_divergence" {
     # sample, the old `filter writes > 0`).
     condition_prometheus_query_language {
       query = join("", [
-        "(sum(rate(logging_googleapis_com:user_${google_logging_metric.active_ingestion_writes[0].name}[${var.alert_ingestion_divergence_window_seconds}s]))",
-        " - (sum(rate(logging_googleapis_com:user_${google_logging_metric.ingestion_activation_invocations[0].name}[${var.alert_ingestion_divergence_window_seconds}s])) or vector(0)))",
-        " / sum(rate(logging_googleapis_com:user_${google_logging_metric.active_ingestion_writes[0].name}[${var.alert_ingestion_divergence_window_seconds}s]))",
+        "(sum(rate(logging_googleapis_com:user_${google_logging_metric.active_ingestion_writes[0].name}{monitored_resource=~\"cloud_function|cloud_run_revision\"}[${var.alert_ingestion_divergence_window_seconds}s]))",
+        " - (sum(rate(logging_googleapis_com:user_${google_logging_metric.ingestion_activation_invocations[0].name}{monitored_resource=\"cloud_run_revision\"}[${var.alert_ingestion_divergence_window_seconds}s])) or vector(0)))",
+        " / sum(rate(logging_googleapis_com:user_${google_logging_metric.active_ingestion_writes[0].name}{monitored_resource=~\"cloud_function|cloud_run_revision\"}[${var.alert_ingestion_divergence_window_seconds}s]))",
         " > ${var.alert_ingestion_divergence_ratio_threshold}",
       ])
       duration            = "${var.alert_ingestion_divergence_window_seconds}s"
